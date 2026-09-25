@@ -59,6 +59,7 @@ class Dataset:
     by_meaning: dict[str, list[Decl]]
     _edges: dict[str, dict[int, list[int]]] = field(default_factory=dict, repr=False)
     _facets: dict[str, dict[str, list[dict]]] = field(default_factory=dict, repr=False)
+    _modules: list[dict] | None = field(default=None, repr=False)
 
     @classmethod
     def load(cls, root: str | Path) -> "Dataset":
@@ -179,3 +180,35 @@ class Dataset:
     def facet_row(self, facet: str, name: str) -> dict | None:
         rows = self.facet(facet).get(name)
         return rows[0] if rows else None
+
+    def annotations(self, attr: str) -> dict[str, list]:
+        """The attribute `attr`'s annotations (facet `annotation.<attr>`), as declaration name → the
+        payload of each application, in order. Reads `annotation/2` (a list of `entries` per row)
+        and `annotation/1` (one `payload` per row)."""
+        out: dict[str, list] = {}
+        for name, rows in self.facet(f"annotation.{attr}").items():
+            for row in rows:
+                if "entries" in row:
+                    out.setdefault(name, []).extend(row["entries"])
+                elif "payload" in row:
+                    out.setdefault(name, []).append(row["payload"])
+        return out
+
+    # --- modules and packages -------------------------------------------------------------
+
+    @property
+    def modules(self) -> list[dict]:
+        """The project's modules (`modules.jsonl`): name, path, imports, doc. Empty for a dataset
+        that does not have the file."""
+        if self._modules is None:
+            entry = self.meta.get("modules")
+            self._modules = []
+            if entry and (self.root / entry["file"]).exists():
+                with (self.root / entry["file"]).open(encoding="utf-8") as f:
+                    self._modules = [json.loads(line) for line in f if line.strip()]
+        return self._modules
+
+    @property
+    def packages(self) -> list[dict]:
+        """The packages the library imports (`meta.json` `packages`): name, modules, requires."""
+        return self.meta.get("packages", [])

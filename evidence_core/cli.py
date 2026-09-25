@@ -71,7 +71,7 @@ def cmd_status(args) -> int:
 def _claims(ds: Dataset, explicit: list[str]) -> list[str]:
     if explicit:
         return explicit
-    return sorted(ds.facet("annotation.claim"))
+    return sorted(ds.annotations("claim"))
 
 
 def cmd_coverage(args) -> int:
@@ -99,8 +99,8 @@ def cmd_queue(args) -> int:
 
 def cmd_claims(args) -> int:
     ds = Dataset.load(args.dataset)
-    for name, rows in sorted(ds.facet("annotation.claim").items()):
-        ref = rows[0].get("payload", {}).get("reference", "")
+    for name, payloads in sorted(ds.annotations("claim").items()):
+        ref = (payloads[0] or {}).get("reference", "") if payloads else ""
         print(f"{name}" + (f"  ({ref})" if ref else ""))
     return 0
 
