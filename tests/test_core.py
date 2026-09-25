@@ -25,6 +25,8 @@ from evidence_core.cli import main as cli
 VECTORS = Path(__file__).parent / "vectors"
 A = Dataset.load(VECTORS / "fixture-a")
 B = Dataset.load(VECTORS / "fixture-b")
+# Version B extracted as if `Fixture.Uses` did not build: it and the root module are unavailable.
+B_PARTIAL = Dataset.load(VECTORS / "fixture-b-partial")
 F = "Fixture."
 
 
@@ -131,6 +133,13 @@ class StatusTests(unittest.TestCase):
         s = classify(unknown_rev, B)
         self.assertEqual(s.state, st.CURRENT)
         self.assertTrue(s.assumed_hasher)
+
+    def test_unavailable(self):
+        self.assertEqual(B_PARTIAL.unavailable, {"Fixture", "Fixture.Uses"})
+        self.assertEqual(classify(review("double_triple")["subject"], B_PARTIAL).state, st.UNAVAILABLE)
+        # A declaration of a module that built is classified as usual.
+        self.assertEqual(classify(review("double_zero")["subject"], B_PARTIAL, old=A).state,
+                         st.STALE_UNDERNEATH)
 
 
 class CoverageTests(unittest.TestCase):

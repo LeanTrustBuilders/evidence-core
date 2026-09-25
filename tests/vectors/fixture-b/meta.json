@@ -1,8 +1,9 @@
 {"toolchain": "leanprover/lean4:v4.34.0-rc2",
  "spec": "ltb-dataset/0",
- "producer": {"version": "0.1.0", "name": "trust-extract"},
+ "producer": {"version": "0.2.0", "name": "trust-extract"},
  "library":
- {"root": "Fixture",
+ {"unavailable": [],
+  "root": "Fixture",
   "repo": "test/fixture",
   "package": "Fixture",
   "modules": 3,

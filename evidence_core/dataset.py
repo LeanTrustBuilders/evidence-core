@@ -85,6 +85,12 @@ class Dataset:
         return self.meta.get("library", {}).get("commit", "")
 
     @property
+    def unavailable(self) -> frozenset[str]:
+        """The library's modules that the dataset does not cover because they did not build at its
+        commit (with the modules importing them): their declarations are absent, not deleted."""
+        return frozenset(self.meta.get("library", {}).get("unavailable", []))
+
+    @property
     def toolchain(self) -> str:
         return self.meta.get("toolchain", "")
 

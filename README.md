@@ -28,6 +28,7 @@ hashes (meaning, local, content). Against a dataset of the current code, a recor
 | `renamed` | the name is gone, but exactly one declaration has the same meaning hash: the record follows it |
 | `stale-underneath` | same name and local hash, different meaning hash: written the same, but something it rests on changed. Given a dataset of the record's commit, the status names the dependencies that were rewritten |
 | `stale` | same name, different local hash: the declaration itself changed |
+| `unavailable` | the name is gone, and the declaration's module did not build at the dataset's commit (the dataset lists it in `library.unavailable`): the record cannot be checked |
 | `orphaned` | neither the name nor the meaning hash exists any more |
 | `incomparable` | the record's hashes come from another hasher revision |
 | `unknown` | the record carries no meaning hash |

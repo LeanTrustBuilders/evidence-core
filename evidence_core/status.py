@@ -9,6 +9,8 @@ code, it is:
 * ``stale-underneath``: same name, different meaning hash, same local hash — the declaration is
   written the same, but something it rests on changed;
 * ``stale``: same name, different meaning and local hashes — the declaration itself changed;
+* ``unavailable``: nothing has the name, and the subject's module did not build at the dataset's
+  commit (``library.unavailable``): the record cannot be checked against this dataset;
 * ``orphaned``: nothing has the name or the meaning hash any more;
 * ``incomparable``: the record's hashes come from a different hasher than the dataset's;
 * ``unknown``: the record has no meaning hash to compare (for example, migrated from a tool that
@@ -24,6 +26,7 @@ CURRENT = "current"
 RENAMED = "renamed"
 STALE_UNDERNEATH = "stale-underneath"
 STALE = "stale"
+UNAVAILABLE = "unavailable"
 ORPHANED = "orphaned"
 INCOMPARABLE = "incomparable"
 UNKNOWN = "unknown"
@@ -82,6 +85,8 @@ def classify(subject: dict, dataset: Dataset, old: Dataset | None = None) -> Sta
                           changed=changed_underneath(name, dataset, old) if old else [],
                           assumed_hasher=assumed)
         return Status(STALE, decl=current, assumed_hasher=assumed)
+    if subject.get("module") in dataset.unavailable:
+        return Status(UNAVAILABLE, assumed_hasher=assumed)
     candidates = dataset.by_meaning.get(meaning, [])
     kind = subject.get("kind")
     if kind:
