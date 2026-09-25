@@ -70,5 +70,5 @@
    "file": "edges/term.bin",
    "description":
    "the type and the whole value, proofs included, restricted to targets that are nodes",
-   "count": 280}],
- "counts": {"upstream": 70, "project": 16, "nodes": 86}}
+   "count": 101}],
+ "counts": {"upstream": 12, "project": 16, "nodes": 28}}
