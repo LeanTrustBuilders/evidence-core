@@ -13,3 +13,5 @@
 {"decl":"Fixture.one","end":[53,30],"keyword":"def","path":"Fixture/Basic.lean","start":[51,0]}
 {"decl":"Fixture.instInhabitedPos","end":[55,33],"keyword":"instance","path":"Fixture/Basic.lean","start":[55,0]}
 {"decl":"Fixture.triple_pos","end":[36,22],"keyword":"theorem","path":"Fixture/Basic.lean","start":[33,0]}
+{"decl":"Fixture.«term𝟚_»","end":[6,31],"keyword":"notation","path":"Fixture/Notation.lean","start":[5,0]}
+{"decl":"Fixture.double_two","end":[9,36],"keyword":"theorem","path":"Fixture/Notation.lean","start":[8,0]}

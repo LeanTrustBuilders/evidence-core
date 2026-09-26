@@ -33,6 +33,14 @@ hashes (meaning, local, content). Against a dataset of the current code, a recor
 | `incomparable` | the record's hashes come from another hasher revision |
 | `unknown` | the record carries no meaning hash |
 
+**Hashes and the graph.** Datasets of `ltb-dataset/1` compute the meaning and local hashes with the
+rule that draws the `meaning` graph (`ltb-meaning/1`), so a record is stale underneath exactly when
+something in its `meaning` closure changed, and the closure members whose local hash changed are the
+ones to blame. Records keyed by the hashes of `ltb-dataset/0` (semantic_hash's) still resolve: given
+a dataset of the record's commit that carries both (every `ltb-dataset/1` dataset keeps the old
+hashes as `legacy`), the record is re-keyed through it and judged like a new one; without one, it is
+compared with the current dataset's legacy hashes.
+
 **Threads.** The records about a declaration read as threads: each review with the comments
 replying to it and the statuses about it. A problem or question is open until a status resolves it
 (`fixed`, `intended`, `invalid`, `answered`), and can be reopened; a review can be withdrawn by its
@@ -74,12 +82,22 @@ python3 -m evidence_core queue    --dataset DS --records evidence.jsonl [--claim
 python3 -m evidence_core claims   --dataset DS
 python3 -m evidence_core diff     --old DS1 --new DS2 [--json]
 python3 -m evidence_core validate evidence.jsonl
+python3 -m evidence_core check-graph   --old DS1 --new DS2 [--strict]
+python3 -m evidence_core compare-rules --a DS_RULE_A --b DS_RULE_B
 python3 -m evidence_core store-check --repo . --base origin/main [--author LOGIN]
 python3 -m evidence_core migrate  reviewed-by path/to/reviews/ --dataset DS --at COMMIT=DS_AT_COMMIT --repo OWNER/NAME --out evidence.jsonl
 ```
 
-`--records` takes a JSONL file or an evidence store's directory. `diff` classifies every project declaration of the first dataset against the second, which is how
-the stability of the hashes is measured between commits.
+`--records` takes a JSONL file or an evidence store's directory. `diff` classifies every project
+declaration of the first dataset against the second, which is how the stability of the hashes is
+measured between commits.
+
+Two self-checks of the suite (dependency-testing.md §9 in the design notes):
+- `check-graph` (check 1): over two datasets of consecutive commits, the declarations whose meaning
+  hash and meaning graph disagree about whether something beneath them changed, each with the path
+  to look at. Under `ltb-meaning/1` it must find nothing; `--strict` exits 1 if it does.
+- `compare-rules`: two datasets of one commit under two rules, for instance `ltb-dataset/0` and
+  `ltb-dataset/1`: the declarations, edges and closures one has and the other lacks, by kind.
 
 ## Library
 

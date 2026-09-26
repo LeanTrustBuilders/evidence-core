@@ -12,6 +12,7 @@ Commands:
   record valid and written by the right account;
 * ``check-graph`` graph against hash over two datasets: declarations whose meaning hash and meaning
   graph disagree about whether something beneath them changed;
+* ``compare-rules`` two datasets of one commit under two rules: how their graphs differ;
 * ``migrate``   convert Reviewed-by ledgers, a Referee audit export, or trust marks to S3.
 """
 from __future__ import annotations
@@ -76,6 +77,38 @@ def cmd_check_graph(args) -> int:
         for f in report.missed[:args.limit]:
             print(f"  {' → '.join(f.path)}  [{f.graph} graph; {'rewritten' if f.rewritten else 'changed underneath'}]")
     return 1 if report.findings and args.strict else 0
+
+
+def cmd_compare_rules(args) -> int:
+    from .checks import compare_rules
+    a, b = Dataset.load(args.a), Dataset.load(args.b)
+    if a.commit != b.commit:
+        print(f"warning: the datasets are of different commits ({a.commit[:12]}, {b.commit[:12]})",
+              file=sys.stderr)
+    c = compare_rules(a, b, args.notion, args.examples)
+    s = c.summary()
+    if args.json:
+        print(json.dumps({**s, "onlyA": c.only_a, "onlyB": c.only_b,
+                          "examplesRemoved": c.examples_removed, "examplesAdded": c.examples_added},
+                         indent=1))
+        return 0
+    print(f"`{args.notion}` graphs of {a.producer()} ({a.hasher.get('name')}) and "
+          f"{b.producer()} ({b.hasher.get('name')})")
+    print(f"project declarations: {s['common']} in both, {s['onlyA']} in A only, {s['onlyB']} in B only")
+    for n in c.only_b[:args.examples]:
+        print(f"  B only: {n}")
+    print(f"direct edges from them: {s['edges']['both']} in both, {s['edges']['onlyA']} in A only, "
+          f"{s['edges']['onlyB']} in B only")
+    print(f"  A only, by target: {s['removedByTargetKind']}")
+    print(f"  B only, by target: {s['addedByTargetKind']}")
+    print(f"closure sizes: A {s['closureA']}, B {s['closureB']}")
+    print(f"  smaller in B: {s['closureSmaller']}, larger: {s['closureLarger']}; lost project "
+          f"declarations: {s['lostProjectDeclarations']}, gained: {s['gainedProjectDeclarations']}")
+    for x, t in c.examples_removed:
+        print(f"  A only: {x} → {t}")
+    for x, t in c.examples_added:
+        print(f"  B only: {x} → {t}")
+    return 0
 
 
 def _policy(args) -> Policy:
@@ -267,6 +300,14 @@ def main(argv: list[str] | None = None) -> int:
     q.add_argument("--json", action="store_true")
     q.add_argument("--strict", action="store_true", help="exit 1 when anything disagrees")
     q.set_defaults(fn=cmd_check_graph)
+
+    q = sub.add_parser("compare-rules", help="two datasets of one commit under two rules")
+    q.add_argument("--a", required=True)
+    q.add_argument("--b", required=True)
+    q.add_argument("--notion", default="meaning")
+    q.add_argument("--examples", type=int, default=10)
+    q.add_argument("--json", action="store_true")
+    q.set_defaults(fn=cmd_compare_rules)
 
     q = sub.add_parser("store-check", help="check a change to an evidence store")
     q.add_argument("--repo", default=".", help="the git repository holding the store")

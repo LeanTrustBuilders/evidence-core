@@ -157,3 +157,94 @@ def graph_against_hash(old: Dataset, new: Dataset, notion: str = "meaning") -> G
     findings.sort(key=lambda f: (f.kind, f.decl))
     return GraphHashReport(compared=compared, changed=moved, stale_underneath=stale_under,
                            findings=findings)
+
+
+# --- Comparing rules --------------------------------------------------------------------------
+
+@dataclass
+class RuleComparison:
+    """Two datasets of the same commit, extracted under two rules (for instance `ltb-dataset/0`'s
+    graph and the rule `ltb-meaning/1`): how their graphs differ along one notion."""
+
+    notion: str
+    #: project declarations in both, and in one only (name lists)
+    common: int
+    only_a: list[str]
+    only_b: list[str]
+    #: direct edges from the common declarations: in both, in `a` only, in `b` only
+    edges_both: int
+    edges_only_a: int
+    edges_only_b: int
+    #: the edges in one only, counted by the kind of their target (in the dataset that has it),
+    #: prefixed by its scope
+    removed_by_kind: dict[str, int]
+    added_by_kind: dict[str, int]
+    #: closure sizes of the common declarations (nodes reachable, the declaration excluded)
+    closure_a: list[int]
+    closure_b: list[int]
+    #: common declarations whose closure lost, or gained, project declarations
+    lost_project: int
+    gained_project: int
+    examples_removed: list[tuple[str, str]]
+    examples_added: list[tuple[str, str]]
+
+    def summary(self) -> dict:
+        def stats(xs: list[int]) -> dict:
+            if not xs:
+                return {}
+            s = sorted(xs)
+            return {"median": s[len(s) // 2], "mean": round(sum(s) / len(s), 1), "max": s[-1],
+                    "total": sum(s)}
+        smaller = sum(1 for x, y in zip(self.closure_a, self.closure_b) if y < x)
+        larger = sum(1 for x, y in zip(self.closure_a, self.closure_b) if y > x)
+        return {"notion": self.notion, "common": self.common, "onlyA": len(self.only_a),
+                "onlyB": len(self.only_b),
+                "edges": {"both": self.edges_both, "onlyA": self.edges_only_a, "onlyB": self.edges_only_b},
+                "removedByTargetKind": dict(sorted(self.removed_by_kind.items(), key=lambda kv: -kv[1])),
+                "addedByTargetKind": dict(sorted(self.added_by_kind.items(), key=lambda kv: -kv[1])),
+                "closureA": stats(self.closure_a), "closureB": stats(self.closure_b),
+                "closureSmaller": smaller, "closureLarger": larger,
+                "lostProjectDeclarations": self.lost_project,
+                "gainedProjectDeclarations": self.gained_project}
+
+
+def _closure_names(ds: Dataset, name: str, notion: str) -> set[str]:
+    return {d.name for d in ds.closure(name, notion, include_self=False)}
+
+
+def compare_rules(a: Dataset, b: Dataset, notion: str = "meaning", examples: int = 20) -> RuleComparison:
+    pa = {d.name for d in a.decls if d.is_project}
+    pb = {d.name for d in b.decls if d.is_project}
+    common = sorted(pa & pb)
+    both = only_a = only_b = 0
+    removed: dict[str, int] = defaultdict(int)
+    added: dict[str, int] = defaultdict(int)
+    ex_rem: list[tuple[str, str]] = []
+    ex_add: list[tuple[str, str]] = []
+    ca, cb = [], []
+    lost = gained = 0
+    label = lambda ds, n: f"{ds.by_name[n].scope} {ds.by_name[n].kind}" if n in ds.by_name else "?"
+    for n in common:
+        ta, tb = set(a.successors(n, notion)), set(b.successors(n, notion))
+        both += len(ta & tb)
+        only_a += len(ta - tb)
+        only_b += len(tb - ta)
+        for t in sorted(ta - tb):
+            removed[label(a, t)] += 1
+            if len(ex_rem) < examples:
+                ex_rem.append((n, t))
+        for t in sorted(tb - ta):
+            added[label(b, t)] += 1
+            if len(ex_add) < examples:
+                ex_add.append((n, t))
+        xa, xb = _closure_names(a, n, notion), _closure_names(b, n, notion)
+        ca.append(len(xa))
+        cb.append(len(xb))
+        lost += bool((xa - xb) & pa)
+        gained += bool((xb - xa) & pb)
+    return RuleComparison(notion=notion, common=len(common), only_a=sorted(pa - pb),
+                          only_b=sorted(pb - pa), edges_both=both, edges_only_a=only_a,
+                          edges_only_b=only_b, removed_by_kind=dict(removed),
+                          added_by_kind=dict(added), closure_a=ca, closure_b=cb,
+                          lost_project=lost, gained_project=gained,
+                          examples_removed=ex_rem, examples_added=ex_add)

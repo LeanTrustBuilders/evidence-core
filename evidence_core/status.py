@@ -50,16 +50,44 @@ class Status:
         return self.state in APPLIES
 
 
-def hasher_compatible(subject: dict, dataset: Dataset) -> tuple[bool, bool]:
-    """(compatible, assumed): whether the record's hashes can be compared with the dataset's."""
-    rec = subject.get("hasher") or {}
-    ds = dataset.hasher
+def _same_hasher(rec: dict, ds: dict) -> tuple[bool, bool]:
+    """(compatible, assumed) for a record's hasher against one of a dataset's hashers."""
     if rec.get("name") and ds.get("name") and rec["name"] != ds["name"]:
         return False, False
     rev, ds_rev = rec.get("revision"), ds.get("revision")
     if rev and ds_rev and rev != ds_rev:
         return False, False
-    return True, not rev
+    if rec.get("local") and ds.get("local") and rec["local"] != ds["local"]:
+        return False, False
+    return True, not rev and bool(ds_rev)
+
+
+def hasher_compatible(subject: dict, dataset: Dataset) -> tuple[bool, bool]:
+    """(compatible, assumed): whether the record's hashes can be compared with the dataset's
+    meaning and local hashes."""
+    return _same_hasher(subject.get("hasher") or {}, dataset.hasher)
+
+
+def is_legacy(subject: dict, dataset: Dataset) -> bool:
+    """Whether the record was keyed by the hashes the dataset carries as ``legacy``: semantic_hash's,
+    from before the rule ``ltb-meaning/1``."""
+    legacy = dataset.legacy_hasher
+    return bool(legacy) and _same_hasher(subject.get("hasher") or {}, legacy)[0] and \
+        not hasher_compatible(subject, dataset)[0]
+
+
+def translate(subject: dict, old: Dataset) -> dict | None:
+    """A record keyed by legacy hashes, re-keyed by the rule's hashes through ``old``: a dataset of
+    ``ltb-dataset/1`` of the commit the record was made at, which has both. None if ``old`` has no
+    declaration of that name with those legacy hashes."""
+    d = old.by_name.get(subject.get("name", ""))
+    hashes = subject.get("hashes") or {}
+    if d is None or not d.legacy_meaning or d.legacy_meaning != hashes.get("meaning"):
+        return None
+    out = dict(subject)
+    out["hashes"] = {"meaning": d.meaning, "local": d.local, "content": d.content}
+    out["hasher"] = {k: old.hasher.get(k) for k in ("name", "revision", "local")}
+    return out
 
 
 def classify(subject: dict, dataset: Dataset, old: Dataset | None = None) -> Status:
@@ -67,6 +95,10 @@ def classify(subject: dict, dataset: Dataset, old: Dataset | None = None) -> Sta
 
     ``old``, when given, is a dataset of the commit the record was made at; it lets a
     ``stale-underneath`` status name the dependencies that were rewritten.
+
+    A record keyed by the legacy hashes (semantic_hash's) is first re-keyed through ``old`` when
+    ``old`` has both kinds (``translate``), and then judged like any other. Without such an ``old``,
+    it is compared with the legacy hashes the dataset carries: the verdict of ``ltb-dataset/0``.
     """
     hashes = subject.get("hashes") or {}
     meaning, local = hashes.get("meaning"), hashes.get("local")
@@ -74,20 +106,37 @@ def classify(subject: dict, dataset: Dataset, old: Dataset | None = None) -> Sta
     current = dataset.by_name.get(name)
     if not meaning:
         return Status(UNKNOWN, decl=current)
+    if is_legacy(subject, dataset):
+        rekeyed = translate(subject, old) if old is not None else None
+        if rekeyed is not None:
+            return classify(rekeyed, dataset, old)
+        assumed = _same_hasher(subject.get("hasher") or {}, dataset.legacy_hasher)[1]
+        return _classify_by(subject, dataset, lambda d: d.legacy_meaning,
+                            lambda d: d.legacy_local, dataset.by_legacy_meaning, None, assumed)
     ok, assumed = hasher_compatible(subject, dataset)
     if not ok:
         return Status(INCOMPARABLE, decl=current)
+    return _classify_by(subject, dataset, lambda d: d.meaning, lambda d: d.local,
+                        dataset.by_meaning, old, assumed)
+
+
+def _classify_by(subject: dict, dataset: Dataset, meaning_of, local_of,
+                 by_meaning: dict[str, list[Decl]], old: Dataset | None, assumed: bool) -> Status:
+    hashes = subject.get("hashes") or {}
+    meaning, local = hashes.get("meaning"), hashes.get("local")
+    name = subject.get("name", "")
+    current = dataset.by_name.get(name)
     if current is not None:
-        if current.meaning == meaning:
+        if meaning_of(current) == meaning:
             return Status(CURRENT, decl=current, assumed_hasher=assumed)
-        if local and current.local == local:
+        if local and local_of(current) == local:
             return Status(STALE_UNDERNEATH, decl=current,
                           changed=changed_underneath(name, dataset, old) if old else [],
                           assumed_hasher=assumed)
         return Status(STALE, decl=current, assumed_hasher=assumed)
     if subject.get("module") in dataset.unavailable:
         return Status(UNAVAILABLE, assumed_hasher=assumed)
-    candidates = dataset.by_meaning.get(meaning, [])
+    candidates = by_meaning.get(meaning, [])
     kind = subject.get("kind")
     if kind:
         same_kind = [d for d in candidates if subject_kind_of(d) == kind]

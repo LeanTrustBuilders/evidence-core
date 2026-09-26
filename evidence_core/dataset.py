@@ -1,4 +1,4 @@
-"""Reading an S2 dataset (spec ``ltb-dataset/0``).
+"""Reading an S2 dataset (specs ``ltb-dataset/1`` and ``ltb-dataset/0``).
 
 A dataset is a directory written by ``trust-extract``:
 
@@ -8,6 +8,11 @@ A dataset is a directory written by ``trust-extract``:
 * ``facets/<name>.jsonl``: per-declaration data, keyed by ``decl`` (a name).
 
 Edge files and facets are read lazily, on first use.
+
+Since ``ltb-dataset/1`` the meaning and local hashes are those of the rule ``ltb-meaning/1``
+(MeaningGraph's, from the walk that draws the ``meaning`` graph), and each declaration also carries,
+as ``legacy``, the hashes ``ltb-dataset/0`` had: semantic_hash's proof-irrelevant hash and the local
+hash ``ltb-local-v1``. Records keyed by those are compared through them (``status.classify``).
 """
 from __future__ import annotations
 
@@ -17,7 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 import sys
 
-SUPPORTED_SPECS = ("ltb-dataset/0",)
+SUPPORTED_SPECS = ("ltb-dataset/1", "ltb-dataset/0")
 
 
 @dataclass(frozen=True)
@@ -34,6 +39,10 @@ class Decl:
     meaning: str | None
     content: str | None
     local: str | None
+    #: The hashes of ``ltb-dataset/0`` (semantic_hash's proof-irrelevant hash, ``ltb-local-v1``),
+    #: which a dataset of ``ltb-dataset/1`` carries for records keyed by them.
+    legacy_meaning: str | None = None
+    legacy_local: str | None = None
 
     @property
     def is_project(self) -> bool:
@@ -42,10 +51,12 @@ class Decl:
     @classmethod
     def from_json(cls, d: dict) -> "Decl":
         h = d.get("hashes", {})
+        legacy = h.get("legacy") or {}
         return cls(id=d["id"], name=d["name"], module=d.get("module", ""),
                    package=d.get("package", ""), scope=d.get("scope", "project"),
                    kind=d.get("kind", ""), is_prop=bool(d.get("isProp", False)),
-                   meaning=h.get("meaning"), content=h.get("content"), local=h.get("local"))
+                   meaning=h.get("meaning"), content=h.get("content"), local=h.get("local"),
+                   legacy_meaning=legacy.get("meaning"), legacy_local=legacy.get("local"))
 
 
 @dataclass
@@ -57,6 +68,7 @@ class Dataset:
     decls: list[Decl]
     by_name: dict[str, Decl]
     by_meaning: dict[str, list[Decl]]
+    by_legacy_meaning: dict[str, list[Decl]] = field(default_factory=dict)
     _edges: dict[str, dict[int, list[int]]] = field(default_factory=dict, repr=False)
     _facets: dict[str, dict[str, list[dict]]] = field(default_factory=dict, repr=False)
     _modules: list[dict] | None = field(default=None, repr=False)
@@ -74,10 +86,14 @@ class Dataset:
                     decls.append(Decl.from_json(json.loads(line)))
         by_name = {d.name: d for d in decls}
         by_meaning: dict[str, list[Decl]] = {}
+        by_legacy: dict[str, list[Decl]] = {}
         for d in decls:
             if d.meaning:
                 by_meaning.setdefault(d.meaning, []).append(d)
-        return cls(root=root, meta=meta, decls=decls, by_name=by_name, by_meaning=by_meaning)
+            if d.legacy_meaning:
+                by_legacy.setdefault(d.legacy_meaning, []).append(d)
+        return cls(root=root, meta=meta, decls=decls, by_name=by_name, by_meaning=by_meaning,
+                   by_legacy_meaning=by_legacy)
 
     # --- identity -------------------------------------------------------------------------
 
@@ -98,6 +114,19 @@ class Dataset:
     @property
     def hasher(self) -> dict:
         return self.meta.get("hasher", {})
+
+    @property
+    def legacy_hasher(self) -> dict:
+        """The hasher of the ``legacy`` hashes, if the dataset carries them (``ltb-dataset/1``)."""
+        return self.hasher.get("legacy") or {}
+
+    @property
+    def content_hasher(self) -> dict:
+        """The hasher of the content hashes: semantic_hash's proof-relevant hash, at a revision."""
+        h = self.hasher
+        if isinstance(h.get("content"), dict):
+            return h["content"]
+        return {"name": h.get("name"), "revision": h.get("revision"), "variant": h.get("content")}
 
     def producer(self) -> str:
         p = self.meta.get("producer", {})
