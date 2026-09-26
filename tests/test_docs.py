@@ -60,6 +60,8 @@ class ModuleDocTests(unittest.TestCase):
         self.assertEqual(md.definitions[0].names, [F + "double"])        # under the module's namespace
         self.assertEqual(md.definitions[0].text, "`double`: twice a number.")
         self.assertEqual(md.results[1].names, [F + "isDouble_double"])   # as written; `nothing_here` resolves to nothing
+        self.assertEqual(md.names["double"], F + "double")
+        self.assertNotIn("nothing_here", md.names)
 
     def test_a_docstrings_first_sentence_is_its_title(self):
         self.assertEqual(docs.first_sentence("The Gamma function $\\Gamma(s)$. It extends."), "The Gamma function $\\Gamma(s)$.")

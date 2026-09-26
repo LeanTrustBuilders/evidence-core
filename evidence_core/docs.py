@@ -50,11 +50,13 @@ class ModuleDoc:
     references: list[str] = field(default_factory=list)
     #: the whole docstring text, the module's docstrings joined
     text: str = ""
+    #: the backquoted names of the docstring that resolve, as written → the declaration
+    names: dict[str, str] = field(default_factory=dict)
 
     def as_json(self) -> dict:
         return {"module": self.module, "title": self.title, "summary": self.summary, "sections": self.sections,
                 "definitions": [i.__dict__ for i in self.definitions], "results": [i.__dict__ for i in self.results],
-                "tags": self.tags, "references": self.references}
+                "tags": self.tags, "references": self.references, "names": self.names}
 
 
 def _clean(text: str) -> str:
@@ -136,6 +138,22 @@ class Resolver:
         for d in ds.decls:
             if d.is_project:
                 self.by_module.setdefault(d.module, []).append(d.name)
+        self._spaces: dict[str, list[str]] = {}
+
+    def spaces(self, module: str) -> list[str]:
+        """The namespaces the module's declarations live in, longest first."""
+        if module not in self._spaces:
+            self._spaces[module] = sorted({n.rsplit(".", 1)[0] for n in self.by_module.get(module, []) if "." in n},
+                                          key=len, reverse=True)
+        return self._spaces[module]
+
+    def names_in(self, text: str, module: str) -> dict[str, str]:
+        """Every backquoted name of a docstring that resolves, as written → the declaration."""
+        out = {}
+        for written in set(BACKTICKED.findall(text or "")):
+            if written not in out and (r := self.resolve(written, module)):
+                out[written] = r
+        return out
 
     def resolve(self, name: str, module: str) -> str | None:
         name = name.strip().removeprefix("_root_.").rstrip(".,;:")
@@ -147,8 +165,7 @@ class Resolver:
             return name
         mine = self.by_module.get(module, [])
         # Under the namespaces the module's own declarations live in.
-        spaces = sorted({n.rsplit(".", 1)[0] for n in mine if "." in n}, key=len, reverse=True)
-        for ns in spaces:
+        for ns in self.spaces(module):
             parts = ns.split(".")
             for k in range(len(parts), 0, -1):
                 cand = ".".join(parts[:k] + [name])
@@ -175,6 +192,7 @@ def module_doc(ds: Dataset, module: dict, resolver: Resolver | None = None) -> M
         elif key in ("tags", "keywords"):
             out.tags = [_clean(t) for t in re.split(r"[,;\n]", body) if _clean(t)]
     out.references = list(dict.fromkeys(BIBKEY.findall(text)))
+    out.names = resolver.names_in(text, module["name"])
     return out
 
 
