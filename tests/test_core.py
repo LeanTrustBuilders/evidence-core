@@ -373,6 +373,49 @@ class StoreTests(unittest.TestCase):
         self.assertIn("2 records, 1 new since HEAD", buf.getvalue())
 
 
+class GraphAgainstHashTests(unittest.TestCase):
+    """Check 1 on the fixture, and on copies of it with one planted disagreement of each kind."""
+
+    def planted(self, ds_path: Path, tmp: Path, edit) -> Dataset:
+        import shutil, struct
+        out = tmp / ds_path.name
+        shutil.copytree(ds_path, out)
+        meta = json.loads((out / "meta.json").read_text())
+        e = next(x for x in meta["edges"] if x["name"] == "meaning")
+        data = (out / e["file"]).read_bytes()
+        pairs = [struct.unpack_from("<ii", data, 8 * k) for k in range(len(data) // 8)]
+        pairs = edit(Dataset.load(ds_path), pairs)
+        (out / e["file"]).write_bytes(b"".join(struct.pack("<ii", a, b) for a, b in pairs))
+        e["count"] = len(pairs)
+        (out / "meta.json").write_text(json.dumps(meta))
+        return Dataset.load(out)
+
+    def test_the_fixture_agrees(self):
+        from evidence_core.checks import graph_against_hash
+        r = graph_against_hash(A, B)
+        self.assertEqual(r.findings, [])
+        self.assertGreaterEqual(r.stale_underneath, 2)   # double_zero, double_triple: explained by double
+
+    def test_planted_disagreements_are_found(self):
+        from evidence_core.checks import graph_against_hash
+        with tempfile.TemporaryDirectory() as t:
+            t = Path(t)
+            # Drop double_zero's edges in both versions: it goes stale underneath with nothing to explain it.
+            drop = lambda ds, pairs: [p for p in pairs if p[0] != ds.by_name[F + "double_zero"].id]
+            (t / "a").mkdir(); (t / "b").mkdir()
+            a = self.planted(VECTORS / "fixture-a", t / "a", drop)
+            b = self.planted(VECTORS / "fixture-b", t / "b", drop)
+            r = graph_against_hash(a, b)
+            self.assertIn(F + "double_zero", [f.decl for f in r.unexplained])
+            # Add an edge from triple (unchanged) to double (changed): its hash should have moved.
+            (t / "c").mkdir()
+            add = lambda ds, pairs: pairs + [(ds.by_name[F + "triple"].id, ds.by_name[F + "double"].id)]
+            b2 = self.planted(VECTORS / "fixture-b", t / "c", add)
+            r = graph_against_hash(A, b2)
+            [f] = [f for f in r.missed if f.decl == F + "triple"]
+            self.assertEqual((f.path, f.graph, f.rewritten), ([F + "triple", F + "double"], "new", True))
+
+
 class CliTests(unittest.TestCase):
     def run_cli(self, *args) -> str:
         buf = io.StringIO()

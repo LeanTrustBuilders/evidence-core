@@ -10,6 +10,8 @@ Commands:
 * ``validate``  check an S3 file;
 * ``store-check`` check a change to an evidence store (git): nothing changed or removed, every new
   record valid and written by the right account;
+* ``check-graph`` graph against hash over two datasets: declarations whose meaning hash and meaning
+  graph disagree about whether something beneath them changed;
 * ``migrate``   convert Reviewed-by ledgers, a Referee audit export, or trust marks to S3.
 """
 from __future__ import annotations
@@ -56,6 +58,24 @@ def cmd_store_check(args) -> int:
     print(f"{len(after)} records, {new} new" + (f" since {args.base}" if args.base else "") +
           (f"; {len(errs)} problems" if errs else "; ok"))
     return 1 if errs else 0
+
+
+def cmd_check_graph(args) -> int:
+    from .checks import graph_against_hash
+    report = graph_against_hash(Dataset.load(args.old), Dataset.load(args.new), args.notion)
+    if args.json:
+        print(json.dumps({**report.summary(), "findings": [f.as_json() for f in report.findings]}, indent=1))
+    else:
+        s = report.summary()
+        print(f"{s['compared']} project declarations in both; meaning hash changed for {s['meaningChanged']} "
+              f"({s['staleUnderneath']} stale underneath)")
+        print(f"unexplained (stale underneath, nothing changed beneath in the graph): {s['unexplained']}")
+        for f in report.unexplained[:args.limit]:
+            print(f"  {f.decl}  (closure {f.closure[0]} → {f.closure[1]})")
+        print(f"missed (something beneath changed in the graph, hash unchanged): {s['missed']}")
+        for f in report.missed[:args.limit]:
+            print(f"  {' → '.join(f.path)}  [{f.graph} graph; {'rewritten' if f.rewritten else 'changed underneath'}]")
+    return 1 if report.findings and args.strict else 0
 
 
 def _policy(args) -> Policy:
@@ -238,6 +258,15 @@ def main(argv: list[str] | None = None) -> int:
     q = sub.add_parser("validate", help="check an S3 file")
     q.add_argument("records")
     q.set_defaults(fn=cmd_validate)
+
+    q = sub.add_parser("check-graph", help="graph against hash over two datasets")
+    q.add_argument("--old", required=True)
+    q.add_argument("--new", required=True)
+    q.add_argument("--notion", default="meaning")
+    q.add_argument("--limit", type=int, default=20, help="findings listed per kind")
+    q.add_argument("--json", action="store_true")
+    q.add_argument("--strict", action="store_true", help="exit 1 when anything disagrees")
+    q.set_defaults(fn=cmd_check_graph)
 
     q = sub.add_parser("store-check", help="check a change to an evidence store")
     q.add_argument("--repo", default=".", help="the git repository holding the store")
