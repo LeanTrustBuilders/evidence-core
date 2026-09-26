@@ -108,7 +108,7 @@ python3 -m evidence_core coverage --dataset DS --records evidence.jsonl [--claim
 python3 -m evidence_core queue    --dataset DS --records evidence.jsonl [--claim NAME]
 python3 -m evidence_core claims   --dataset DS [--source CHECKOUT] [--store evidence] [--json]
 python3 -m evidence_core diff     --old DS1 --new DS2 [--json]
-python3 -m evidence_core ledger   --ledger ledger.json --dataset DS [--date D] [--label L]
+python3 -m evidence_core ledger   --ledger ledger.json --dataset DS [--date D] [--label L]   (or --previous COMMIT)
 python3 -m evidence_core validate evidence.jsonl
 python3 -m evidence_core check-graph   --old DS1 --new DS2 [--strict]
 python3 -m evidence_core compare-rules --a DS_RULE_A --b DS_RULE_B

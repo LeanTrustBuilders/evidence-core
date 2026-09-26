@@ -215,6 +215,12 @@ def cmd_diff(args) -> int:
 def cmd_ledger(args) -> int:
     from . import ledger as ledger_mod
     led = ledger_mod.load(Path(args.ledger))
+    if args.previous:
+        print(ledger_mod.previous(led, args.previous) or "")
+        return 0
+    if not args.dataset:
+        print("--dataset: the build to record", file=sys.stderr)
+        return 2
     ds = Dataset.load(args.dataset)
     if ledger_mod.record(led, ds, date=args.date, label=args.label):
         ledger_mod.save(led, Path(args.ledger))
@@ -301,7 +307,9 @@ def main(argv: list[str] | None = None) -> int:
 
     q = sub.add_parser("ledger", help="record a build in a provenance ledger (when each meaning changed)")
     q.add_argument("--ledger", required=True, help="the ledger file (created if missing)")
-    q.add_argument("--dataset", required=True)
+    q.add_argument("--dataset", help="the build to record")
+    q.add_argument("--previous", metavar="COMMIT",
+                   help="instead, print the last build before COMMIT (a new build's baseline)")
     q.add_argument("--date", default="")
     q.add_argument("--label", default="")
     q.set_defaults(fn=cmd_ledger)

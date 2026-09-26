@@ -454,6 +454,9 @@ class CliTests(unittest.TestCase):
             led = Path(d) / "ledger.json"
             self.assertIn("recorded", self.run_cli("ledger", "--ledger", str(led), "--dataset", str(VECTORS / "fixture-a")))
             self.assertIn("already", self.run_cli("ledger", "--ledger", str(led), "--dataset", str(VECTORS / "fixture-a")))
+            self.run_cli("ledger", "--ledger", str(led), "--dataset", str(VECTORS / "fixture-b"))
+            self.assertEqual(self.run_cli("ledger", "--ledger", str(led), "--previous", B.commit).strip(), A.commit)
+            self.assertEqual(self.run_cli("ledger", "--ledger", str(led), "--previous", "new").strip(), B.commit)
 
     def test_status_and_coverage(self):
         with tempfile.TemporaryDirectory() as d:

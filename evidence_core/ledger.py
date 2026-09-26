@@ -68,5 +68,12 @@ def record(ledger: dict, ds: Dataset, date: str = "", label: str = "") -> bool:
     return True
 
 
+def previous(ledger: dict, commit: str) -> str | None:
+    """The commit of the last build recorded before ``commit``: the baseline a new build of it
+    compares against."""
+    commits = [b["commit"] for b in ledger["builds"] if b["commit"] != commit]
+    return commits[-1] if commits else None
+
+
 def save(ledger: dict, path: Path) -> None:
     Path(path).write_text(json.dumps(ledger, ensure_ascii=False, separators=(",", ":")) + "\n", encoding="utf-8")
