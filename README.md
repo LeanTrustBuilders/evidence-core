@@ -95,6 +95,19 @@ reads) takes what it shows from here, and only chooses how to display it:
   specifications and characterizations, the scope of a claims-only page, trusted packages;
 - `source`: a declaration's text from the `source` facet and a checkout, with or without its doc
   comment, and its statement apart from its proof (`split_statement`).
+- `docs`: a library's own documentation: module docstrings read as their sections (title, summary,
+  main definitions and results with their names resolved, tags, references), a docstring's first
+  sentence as a title, and the attributes (facet `attributes`, written by the extractor's
+  `scripts/attributes.py`) as links: Stacks project and Kerodon tags, Wikidata items, deprecation;
+- `catalogs`: the catalogues a library keeps beside its code, as Mathlib does in `docs/`: subject trees
+  (`overview.yaml`, `undergrad.yaml`), famous theorems (`100.yaml`, `1000.yaml`) and the bibliography
+  (`references.bib`), matched against the dataset;
+- `graphs`: the meaning and proof graphs summarized for readers who are not Lean experts: concepts and
+  results (instances and generated helpers gone through by their type), what each is built from, is
+  about and uses, the reverse (facts about a concept, its examples, what is built on it, where a
+  result is used), an importance, basic notions (those the library builds on) and routine proof steps
+  (widely used lemmas, proof automation). [mathlib-explorer](https://github.com/LeanTrustBuilders/mathlib-explorer)
+  is built from these.
 
 **Migration** from existing tools: Reviewed-by's ledgers, Referee's audit exports, trust's marks.
 Referee's audits and trust's marks record no reviewer, so their migration needs the reviewer's
