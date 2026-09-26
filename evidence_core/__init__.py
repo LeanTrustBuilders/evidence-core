@@ -8,4 +8,4 @@ from .status import classify, Status, changed_underneath
 from .coverage import Evidence, Policy, Coverage, coverage, queue
 from .store import Store, StoreError
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
