@@ -3,10 +3,11 @@
 Records are JSON objects, stored one per line (JSONL), append-only. Every record has:
 
 * ``schema``: ``"ltb-evidence/0"``;
-* ``kind``: ``review``, ``comment``, ``status``, ``test``, or ``named`` in this version;
+* ``kind``: ``review``, ``comment``, ``status``, ``test``, ``challenge`` or ``named`` in this
+  version;
 * ``id``: the first 16 hex digits of the SHA-256 of the record's canonical form, which excludes
   ``id`` and ``signature``;
-* ``subject`` (reviews, tests, named results; optional for comments): the S1 key of the
+* ``subject`` (reviews, tests, challenges, named results; optional for comments): the S1 key of the
   declaration the record is about;
 * ``by``: who made it, which is never anonymous: a GitHub account (``identity``), or an AI agent
   (``agent``), or an agent acting through a GitHub account (both); ``at``: when (RFC 3339, UTC);
@@ -23,12 +24,18 @@ from pathlib import Path
 from typing import Iterable
 
 SCHEMA = "ltb-evidence/0"
-KINDS = ("review", "comment", "status", "test", "named")
+KINDS = ("review", "comment", "status", "test", "challenge", "named")
 VERDICTS = ("accept", "problem", "question")
 SUBJECT_KINDS = ("definition", "statement", "instance", "link", "text")
 PROBLEM_CATEGORIES = ("F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "naming", "other")
 CHECK_STATES = ("checked", "unchecked", "na")
-STATES = ("fixed", "intended", "invalid", "answered", "reopened", "withdrawn")
+STATES = ("fixed", "intended", "invalid", "answered", "met", "failed", "declined", "reopened", "withdrawn")
+#: What each state may be set on: a review of that verdict, or a record of that kind.
+STATE_TARGETS = {"fixed": ("problem",), "intended": ("problem",), "invalid": ("problem",),
+                 "answered": ("question",), "met": ("challenge",), "failed": ("challenge",),
+                 "declined": ("challenge",), "reopened": ("problem", "question", "challenge"),
+                 "withdrawn": ("accept", "problem", "question", "test", "challenge", "named")}
+NAMED_WHAT = ("result", "definition")
 REVIEWER_KINDS = ("person", "agent")
 IDENTITY_KINDS = ("github",)
 INVOLVEMENT = ("author", "contributor", "outsider", "unknown")
@@ -147,7 +154,7 @@ def validate(record: dict) -> list[str]:
                 errs.append("by.agent is required for an agent, as {tool, model, session}")
         if by.get("involvement", "unknown") not in INVOLVEMENT:
             errs.append(f"by.involvement must be one of {INVOLVEMENT}")
-    if kind in ("review", "test", "named"):
+    if kind in ("review", "test", "challenge", "named"):
         if need("subject"):
             s = record["subject"]
             for k in ("name", "commit"):
@@ -182,9 +189,23 @@ def validate(record: dict) -> list[str]:
     elif kind == "test":
         if need("test"):
             need("name", record["test"], "test.")
+        if record.get("by", {}).get("kind") == "agent" and not record.get("checks"):
+            errs.append("a test listed by an agent says what it checks")
+    elif kind == "challenge":
+        need("property")
+        for m in record.get("modes") or []:
+            if m not in PROBLEM_CATEGORIES:
+                errs.append(f"mode {m!r} is not a failure mode")
     elif kind == "named":
         need("name")
+        if record.get("what", "result") not in NAMED_WHAT:
+            errs.append(f"what must be one of {NAMED_WHAT}")
     return errs
+
+
+def target_kind(record: dict) -> str:
+    """What a status can be about: a review's verdict, or the record's kind."""
+    return record.get("verdict", "") if record.get("kind") == "review" else record.get("kind", "")
 
 
 def load(path: str | Path) -> list[dict]:

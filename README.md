@@ -41,6 +41,13 @@ a dataset of the record's commit that carries both (every `ltb-dataset/1` datase
 hashes as `legacy`), the record is re-keyed through it and judged like a new one; without one, it is
 compared with the current dataset's legacy hashes.
 
+**Tests and challenges.** A `test` record names a declaration of the library that tests another; a
+`challenge` is a proposed test, open until it is met (by a declaration that proves it), failed,
+declined or withdrawn. `Evidence.tests(name)` lists a declaration's tests, those of met challenges
+included, each **passing** while the testing declaration is in the dataset without `sorry` (from the
+axioms facet), **with sorry**, or **missing**; `Evidence.challenges(name)` lists its challenges with
+their states.
+
 **Threads.** The records about a declaration read as threads: each review with the comments
 replying to it and the statuses about it. A problem or question is open until a status resolves it
 (`fixed`, `intended`, `invalid`, `answered`), and can be reopened; a review can be withdrawn by its

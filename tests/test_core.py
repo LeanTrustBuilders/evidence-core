@@ -495,5 +495,57 @@ class LegacyTests(unittest.TestCase):
         self.assertEqual(classify(review("triple")["subject"], V0_B).state, st.INCOMPARABLE)
 
 
+class ChallengeAndTestTests(unittest.TestCase):
+    """Proposed tests (challenges), and tests: the declarations of the library that test another."""
+
+    def rec(self, kind, decl, ds=A, agent=False, **fields):
+        by = {"kind": "agent", "identity": {"kind": "github", "id": "op"}, "agent": {"tool": "t"}} if agent else \
+            {"kind": "person", "identity": {"kind": "github", "id": "tester"}}
+        return with_id({"schema": "ltb-evidence/0", "kind": kind, "subject": rec.subject_from_decl(ds.by_name[F + decl], ds),
+                        "by": by, "at": fields.pop("at", "2026-09-26T10:00:00Z"), **fields})
+
+    def status(self, target, state, at="2026-09-26T11:00:00Z", **fields):
+        return with_id({"schema": "ltb-evidence/0", "kind": "status", "target": target["id"], "state": state,
+                        "by": {"kind": "person", "identity": {"kind": "github", "id": "tester"}}, "at": at, **fields})
+
+    def test_validation(self):
+        self.assertEqual(validate(self.rec("challenge", "double", property="double 0 = 0", modes=["F3"])), [])
+        self.assertIn("missing property", validate(self.rec("challenge", "double")))
+        self.assertTrue(any("mode" in e for e in validate(self.rec("challenge", "double", property="p", modes=["F99"]))))
+        self.assertEqual(validate(self.rec("test", "double", test={"name": F + "double_zero"})), [])
+        self.assertTrue(any("says what it checks" in e for e in
+                            validate(self.rec("test", "double", agent=True, test={"name": F + "double_zero"}))))
+        self.assertEqual(validate(self.status(self.rec("challenge", "double", property="p"), "met",
+                                              test={"name": F + "double_zero"})), [])
+
+    def test_tests_pass_while_they_are_there(self):
+        there = self.rec("test", "double", test={"name": F + "double_zero"}, checks="the value at 0")
+        gone = self.rec("test", "double", test={"name": F + "no_such_lemma"}, checks="x")
+        ev = Evidence.resolve([there, gone], B)
+        got = {t["test"]: t["result"] for t in ev.tests(F + "double")}
+        self.assertEqual(got, {F + "double_zero": "passes", F + "no_such_lemma": "missing"})
+
+    def test_a_challenge_is_open_until_met_declined_or_failed(self):
+        c = self.rec("challenge", "double", property="double 0 = 0", statement="double 0 = 0")
+        ev = Evidence.resolve([c], B)
+        self.assertEqual(ev.challenges(F + "double"), [(c, "open")])
+        self.assertEqual(ev.open_challenges(F + "double"), [c])
+        met = self.status(c, "met", test={"name": F + "double_zero"})
+        ev = Evidence.resolve([c, met], B)
+        self.assertEqual(ev.challenges(F + "double"), [(c, "met")])
+        tests = ev.tests(F + "double")
+        self.assertEqual([(t["test"], t["result"], t["challenge"]["id"]) for t in tests],
+                         [(F + "double_zero", "passes", c["id"])])
+        reopened = self.status(c, "reopened", at="2026-09-26T12:00:00Z")
+        self.assertEqual(Evidence.resolve([c, met, reopened], B).open_challenges(F + "double"), [c])
+        for state in ("declined", "failed", "withdrawn"):
+            self.assertEqual(Evidence.resolve([c, self.status(c, state)], B).challenges(F + "double"), [(c, state)])
+
+    def test_named_records_can_be_withdrawn(self):
+        n = self.rec("named", "triple_pos", name="Positivity of triple", what="result")
+        self.assertEqual(Evidence.resolve([n], B).named(F + "triple_pos"), [n])
+        self.assertEqual(Evidence.resolve([n, self.status(n, "withdrawn")], B).named(F + "triple_pos"), [])
+
+
 if __name__ == "__main__":
     unittest.main()

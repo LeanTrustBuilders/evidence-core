@@ -106,11 +106,12 @@ class Evidence:
         return ev
 
     def state(self, record_id: str) -> str:
-        """The latest status of a record: ``open`` for a problem or question with none (or
-        reopened), ``stands`` for anything else with none."""
+        """The latest status of a record: ``open`` for a problem, question or challenge with none
+        (or reopened), ``stands`` for anything else with none."""
         latest = (self.statuses.get(record_id) or [None])[-1]
         r = self.by_id.get(record_id, {})
-        opens = r.get("kind") == "review" and r.get("verdict") in ("problem", "question")
+        opens = (r.get("kind") == "review" and r.get("verdict") in ("problem", "question")) or \
+            r.get("kind") == "challenge"
         if latest is None or latest.get("state") == "reopened":
             return OPEN if opens else STANDS
         return latest["state"]
@@ -164,6 +165,57 @@ class Evidence:
         accepts = [r for r, s in self.records_on(name, "review")
                    if r.get("verdict") == "accept" and self.in_force(r, s)]
         return bool(accepts) and bool(self.open_problems(name))
+
+    def latest_status(self, record_id: str) -> dict | None:
+        return (self.statuses.get(record_id) or [None])[-1]
+
+    def test_result(self, test_name: str, key: dict | None = None) -> tuple[str, str]:
+        """Whether a test (a declaration of the library) is there at the dataset's commit, and
+        without ``sorry``: (``passes``, ``sorry`` or ``missing``, its current name). A test renamed
+        with the same meaning is followed, when its key has a meaning hash."""
+        d = self.dataset.by_name.get(test_name)
+        if d is None and key and (key.get("hashes") or {}).get("meaning"):
+            s = st.classify(key, self.dataset)
+            d = s.decl if s.state == st.RENAMED else None
+        if d is None:
+            return "missing", test_name
+        axioms = self.dataset.facet_row("axioms", d.name) or {}
+        return ("sorry" if axioms.get("sorry") else "passes"), d.name
+
+    def tests(self, name: str) -> list[dict]:
+        """The tests of a declaration, as a page lists them: each `test` record not withdrawn, and
+        each challenge met by a declaration it names. Each has ``record``, ``test`` (the name of the
+        testing declaration), ``checks``, ``result`` (``passes``, ``sorry``, ``missing``) and, for a
+        met challenge, ``challenge``."""
+        out = []
+        for r, _ in self.records_on(name, "test"):
+            if self.state(r["id"]) == "withdrawn":
+                continue
+            key = r.get("test") or {}
+            result, now = self.test_result(key.get("name", ""), key)
+            out.append({"record": r, "test": now, "checks": r.get("checks", ""), "result": result})
+        for r, _ in self.records_on(name, "challenge"):
+            latest = self.latest_status(r["id"])
+            key = (latest or {}).get("test") or {}
+            if isinstance(key, str):
+                key = {"name": key}
+            if latest and latest.get("state") == "met" and key.get("name"):
+                result, now = self.test_result(key["name"], key)
+                out.append({"record": r, "test": now, "checks": r.get("property", ""),
+                            "result": result, "challenge": r, "met": latest})
+        return out
+
+    def challenges(self, name: str) -> list[tuple[dict, str]]:
+        """The challenges (proposed tests) about a declaration, each with its state: ``open``,
+        ``met``, ``failed``, ``declined`` or ``withdrawn``."""
+        return [(r, self.state(r["id"])) for r, _ in self.records_on(name, "challenge")]
+
+    def open_challenges(self, name: str) -> list[dict]:
+        return [r for r, state in self.challenges(name) if state == OPEN]
+
+    def named(self, name: str) -> list[dict]:
+        """The `named` records about a declaration that are not withdrawn."""
+        return [r for r, _ in self.records_on(name, "named") if self.state(r["id"]) != "withdrawn"]
 
     def checked(self, name: str) -> dict[str, list[dict]]:
         """For each failure mode, the acceptances in force that say they checked it."""
