@@ -3,11 +3,14 @@
 Records are JSON objects, stored one per line (JSONL), append-only. Every record has:
 
 * ``schema``: ``"ltb-evidence/0"``;
-* ``kind``: ``review``, ``status``, ``test``, or ``named`` in this version;
+* ``kind``: ``review``, ``comment``, ``status``, ``test``, or ``named`` in this version;
 * ``id``: the first 16 hex digits of the SHA-256 of the record's canonical form, which excludes
   ``id`` and ``signature``;
-* ``subject`` (all kinds but ``status``): the S1 key of the declaration the record is about;
-* ``by``: who made it; ``at``: when (RFC 3339, UTC); ``origin``: where it came from.
+* ``subject`` (reviews, tests, named results; optional for comments): the S1 key of the
+  declaration the record is about;
+* ``by``: who made it, which is never anonymous: a GitHub account (``identity``), or an AI agent
+  (``agent``), or an agent acting through a GitHub account (both); ``at``: when (RFC 3339, UTC);
+  ``origin``: where it came from.
 
 The canonical form is the JSON encoding with sorted keys, no whitespace, and non-ASCII characters
 written as themselves (as trust's canonical claims are).
@@ -20,15 +23,60 @@ from pathlib import Path
 from typing import Iterable
 
 SCHEMA = "ltb-evidence/0"
-KINDS = ("review", "status", "test", "named")
+KINDS = ("review", "comment", "status", "test", "named")
 VERDICTS = ("accept", "problem", "question")
 SUBJECT_KINDS = ("definition", "statement", "instance", "link", "text")
 PROBLEM_CATEGORIES = ("F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "naming", "other")
 CHECK_STATES = ("checked", "unchecked", "na")
-STATES = ("fixed", "intended", "invalid", "reopened", "withdrawn")
+STATES = ("fixed", "intended", "invalid", "answered", "reopened", "withdrawn")
 REVIEWER_KINDS = ("person", "agent")
-IDENTITY_KINDS = ("none", "github", "key")
+IDENTITY_KINDS = ("github",)
 INVOLVEMENT = ("author", "contributor", "outsider", "unknown")
+
+
+def parse_agent(label: str) -> dict:
+    """An agent given as a label, as Reviewed-by writes it ("Claude Code, Opus 5, session 0957"), as
+    ``{tool, model, session}``."""
+    parts = [p.strip() for p in label.split(",") if p.strip()]
+    out: dict = {"tool": parts[0] if parts else "unknown agent"}
+    for p in parts[1:]:
+        if p.lower().startswith("session "):
+            out["session"] = p[len("session "):].strip()
+        elif "model" not in out:
+            out["model"] = p
+    return out
+
+
+def agent_label(agent: dict | str | None) -> str:
+    """How to show an agent: "Claude Code (claude-opus-5-5)"."""
+    if not agent:
+        return ""
+    if isinstance(agent, str):
+        return agent
+    return agent.get("tool", "agent") + (f" ({agent['model']})" if agent.get("model") else "")
+
+
+def who(by: dict) -> str:
+    """How to show a record's author: the GitHub login, and the agent if it is one."""
+    login = (by.get("identity") or {}).get("id", "")
+    if by.get("kind") == "agent":
+        label = agent_label(by.get("agent"))
+        return f"{label} via {login}" if login else label
+    return login
+
+
+def same_reviewer(a: dict, b: dict) -> bool:
+    """Whether two ``by`` fields name the same reviewer: the same account, and for agents the same
+    tool and model."""
+    ia, ib = (a.get("identity") or {}).get("id"), (b.get("identity") or {}).get("id")
+    if ia != ib or a.get("kind") != b.get("kind"):
+        return False
+    if a.get("kind") == "agent":
+        ga, gb = a.get("agent") or {}, b.get("agent") or {}
+        if isinstance(ga, str) or isinstance(gb, str):
+            return ga == gb
+        return (ga.get("tool"), ga.get("model")) == (gb.get("tool"), gb.get("model"))
+    return True
 
 
 def canonical(record: dict) -> str:
@@ -85,14 +133,21 @@ def validate(record: dict) -> list[str]:
         by = record["by"]
         if by.get("kind") not in REVIEWER_KINDS:
             errs.append(f"by.kind must be one of {REVIEWER_KINDS}")
-        ident = by.get("identity", {})
-        if ident.get("kind") not in IDENTITY_KINDS:
-            errs.append(f"by.identity.kind must be one of {IDENTITY_KINDS}")
-        if by.get("kind") == "agent" and not by.get("agent"):
-            errs.append("by.agent is required for an agent")
+        ident = by.get("identity")
+        if ident is not None:
+            if ident.get("kind") not in IDENTITY_KINDS:
+                errs.append(f"by.identity.kind must be one of {IDENTITY_KINDS}")
+            elif not ident.get("id"):
+                errs.append("by.identity.id is required")
+        if by.get("kind") == "person" and ident is None:
+            errs.append("a person is identified by a GitHub account (by.identity)")
+        if by.get("kind") == "agent":
+            agent = by.get("agent")
+            if not isinstance(agent, dict) or not agent.get("tool"):
+                errs.append("by.agent is required for an agent, as {tool, model, session}")
         if by.get("involvement", "unknown") not in INVOLVEMENT:
             errs.append(f"by.involvement must be one of {INVOLVEMENT}")
-    if kind != "status":
+    if kind in ("review", "test", "named"):
         if need("subject"):
             s = record["subject"]
             for k in ("name", "commit"):
@@ -116,6 +171,10 @@ def validate(record: dict) -> list[str]:
         for c in record.get("caveats") or []:
             if c.get("category") not in PROBLEM_CATEGORIES:
                 errs.append(f"caveat category {c.get('category')!r} is unknown")
+    elif kind == "comment":
+        need("text")
+        if not (record.get("links") or {}).get("replies_to"):
+            errs.append("a comment needs links.replies_to")
     elif kind == "status":
         need("target")
         if record.get("state") not in STATES:

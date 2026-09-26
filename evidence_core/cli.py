@@ -8,6 +8,8 @@ Commands:
 * ``claims``    the declarations annotated ``@[claim]`` in a dataset;
 * ``diff``      how every project declaration moved between two datasets;
 * ``validate``  check an S3 file;
+* ``store-check`` check a change to an evidence store (git): nothing changed or removed, every new
+  record valid and written by the right account;
 * ``migrate``   convert Reviewed-by ledgers, a Referee audit export, or trust marks to S3.
 """
 from __future__ import annotations
@@ -22,6 +24,7 @@ from .coverage import Evidence, Policy, coverage as coverage_of, queue as queue_
 from . import migrate as mig
 from . import records as rec
 from . import status as st
+from . import store as sto
 from .dataset import Dataset
 
 
@@ -38,6 +41,23 @@ def _old_datasets(specs: list[str]) -> dict[str, Dataset]:
     return out
 
 
+def _records(path: str) -> list[dict]:
+    """The records of a JSONL file, or of an evidence store (a directory)."""
+    return sto.Store.load(path).records if Path(path).is_dir() else rec.load(path)
+
+
+def cmd_store_check(args) -> int:
+    after = sto.Store.load(Path(args.repo) / args.store).records
+    before = sto.records_at(args.repo, args.base, args.store) if args.base else []
+    errs = sto.check(before, after, author=args.author or None)
+    for e in errs:
+        print(f"error: {e}", file=sys.stderr)
+    new = len({r["id"] for r in after} - {r["id"] for r in before})
+    print(f"{len(after)} records, {new} new" + (f" since {args.base}" if args.base else "") +
+          (f"; {len(errs)} problems" if errs else "; ok"))
+    return 1 if errs else 0
+
+
 def _policy(args) -> Policy:
     return Policy(agents=args.agents, stale_underneath=args.stale_underneath,
                       caveats=not args.no_caveats, authors=not args.no_authors,
@@ -49,7 +69,7 @@ def cmd_status(args) -> int:
     old = _old_datasets(args.at)
     counts: Counter = Counter()
     rows = []
-    for r in rec.load(args.records):
+    for r in _records(args.records):
         if r.get("kind") == "status":
             continue
         s = st.classify(r.get("subject", {}), ds, old.get(r.get("subject", {}).get("commit", "")))
@@ -76,7 +96,7 @@ def _claims(ds: Dataset, explicit: list[str]) -> list[str]:
 
 def cmd_coverage(args) -> int:
     ds = Dataset.load(args.dataset)
-    ev = Evidence.resolve(rec.load(args.records), ds, _old_datasets(args.at))
+    ev = Evidence.resolve(_records(args.records), ds, _old_datasets(args.at))
     out = [coverage_of(ev, c, _policy(args)).summary() for c in _claims(ds, args.claim)]
     if args.json:
         print(json.dumps(out, indent=1))
@@ -91,7 +111,7 @@ def cmd_coverage(args) -> int:
 
 def cmd_queue(args) -> int:
     ds = Dataset.load(args.dataset)
-    ev = Evidence.resolve(rec.load(args.records), ds)
+    ev = Evidence.resolve(_records(args.records), ds)
     for d, w in queue_of(ev, _claims(ds, args.claim), _policy(args), limit=args.limit):
         print(f"{w:4} {d.kind:12} {d.name}")
     return 0
@@ -140,7 +160,7 @@ def cmd_diff(args) -> int:
 
 def cmd_validate(args) -> int:
     bad = 0
-    for n, r in enumerate(rec.load(args.records), 1):
+    for n, r in enumerate(_records(args.records), 1):
         for e in rec.validate(r):
             print(f"{args.records}: record {n}: {e}")
             bad += 1
@@ -218,6 +238,13 @@ def main(argv: list[str] | None = None) -> int:
     q = sub.add_parser("validate", help="check an S3 file")
     q.add_argument("records")
     q.set_defaults(fn=cmd_validate)
+
+    q = sub.add_parser("store-check", help="check a change to an evidence store")
+    q.add_argument("--repo", default=".", help="the git repository holding the store")
+    q.add_argument("--store", default="evidence", help="the store's directory in it")
+    q.add_argument("--base", help="the revision before the change (default: check the store alone)")
+    q.add_argument("--author", help="the GitHub login that made the change: new records must be by it")
+    q.set_defaults(fn=cmd_store_check)
 
     q = sub.add_parser("migrate", help="convert existing review data to S3")
     q.add_argument("source", choices=["reviewed-by", "referee", "trust"])

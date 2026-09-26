@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .dataset import Dataset, Decl
+from . import records as rec
 from . import status as st
 
 
@@ -31,15 +32,31 @@ class Policy:
     upstream: bool = False
 
 
+#: The state a record is in when it has no status: a problem or question is open, anything else
+#: stands.
+OPEN = "open"
+STANDS = "stands"
+
+
 @dataclass
 class Evidence:
-    """Every record about the current declarations, resolved against a dataset."""
+    """Every record about the current declarations, resolved against a dataset, and read as threads
+    (S3, "Threads"): each record's latest status, the comments replying to it, and whether a later
+    review by the same reviewer superseded it."""
 
     dataset: Dataset
-    #: current declaration name → [(record, status)]
+    #: current declaration name → [(record, status)], reviews, tests, named results and comments
     by_decl: dict[str, list[tuple[dict, st.Status]]] = field(default_factory=dict)
     #: records whose subject has no current declaration
     orphans: list[tuple[dict, st.Status]] = field(default_factory=list)
+    #: record id → the record
+    by_id: dict[str, dict] = field(default_factory=dict)
+    #: record id → the statuses about it, in time order
+    statuses: dict[str, list[dict]] = field(default_factory=dict)
+    #: record id → the comments replying to it, in time order
+    replies: dict[str, list[dict]] = field(default_factory=dict)
+    #: review id → the id of the later review, by the same reviewer, that superseded it
+    superseded_by: dict[str, str] = field(default_factory=dict)
     #: problem record id → latest state ("open", "fixed", "intended", "invalid", "withdrawn")
     problem_state: dict[str, str] = field(default_factory=dict)
 
@@ -50,37 +67,82 @@ class Evidence:
         those commits, so that stale-underneath statuses can name what changed."""
         ev = cls(dataset=dataset)
         old = old or {}
-        for r in sorted(records, key=lambda r: r.get("at", "")):
-            if r.get("kind") == "status":
-                target = r.get("target")
-                state = r.get("state")
+        ordered = sorted(records, key=lambda r: r.get("at", ""))
+        ev.by_id = {r["id"]: r for r in ordered if r.get("id")}
+        decl_of: dict[str, str] = {}
+        for r in ordered:
+            kind = r.get("kind")
+            if kind == "status":
+                if r.get("target"):
+                    ev.statuses.setdefault(r["target"], []).append(r)
+                continue
+            if kind == "comment":
+                target = (r.get("links") or {}).get("replies_to")
                 if target:
-                    ev.problem_state[target] = "open" if state == "reopened" else state
+                    ev.replies.setdefault(target, []).append(r)
+                name = decl_of.get(target or "")
+                subject = r.get("subject")
+                if name is None and subject:
+                    s = st.classify(subject, dataset, old.get(subject.get("commit", "")))
+                    name = s.decl.name if s.decl else None
+                if name is not None:
+                    ev.by_decl.setdefault(name, []).append((r, st.Status(st.CURRENT, dataset.by_name.get(name))))
+                    decl_of[r["id"]] = name
                 continue
             subject = r.get("subject") or {}
             s = st.classify(subject, dataset, old.get(subject.get("commit", "")))
-            if r.get("kind") == "review" and r.get("verdict") == "problem":
-                ev.problem_state.setdefault(r["id"], "open")
             if s.decl is not None:
                 ev.by_decl.setdefault(s.decl.name, []).append((r, s))
+                decl_of[r.get("id", "")] = s.decl.name
             else:
                 ev.orphans.append((r, s))
+            earlier = (r.get("links") or {}).get("supersedes")
+            if kind == "review" and earlier in ev.by_id and \
+                    rec.same_reviewer(ev.by_id[earlier].get("by", {}), r.get("by", {})):
+                ev.superseded_by[earlier] = r["id"]
+        for r in ordered:
+            if r.get("kind") == "review" and r.get("verdict") == "problem":
+                ev.problem_state[r["id"]] = ev.state(r["id"])
         return ev
+
+    def state(self, record_id: str) -> str:
+        """The latest status of a record: ``open`` for a problem or question with none (or
+        reopened), ``stands`` for anything else with none."""
+        latest = (self.statuses.get(record_id) or [None])[-1]
+        r = self.by_id.get(record_id, {})
+        opens = r.get("kind") == "review" and r.get("verdict") in ("problem", "question")
+        if latest is None or latest.get("state") == "reopened":
+            return OPEN if opens else STANDS
+        return latest["state"]
+
+    def in_force(self, r: dict, s: st.Status | None = None) -> bool:
+        """Whether a review still counts as its reviewer's view of the current code: it applies,
+        and is neither withdrawn nor superseded."""
+        if r.get("id") in self.superseded_by or self.state(r.get("id", "")) == "withdrawn":
+            return False
+        return s is None or s.applies
 
     def records_on(self, name: str, kind: str | None = None) -> list[tuple[dict, st.Status]]:
         rows = self.by_decl.get(name, [])
         return [(r, s) for r, s in rows if kind is None or r.get("kind") == kind]
 
     def open_problems(self, name: str) -> list[dict]:
+        """Problems reported on the declaration and not resolved, whatever version they were
+        reported against: a problem stays open until someone says it was fixed."""
         return [r for r, _ in self.records_on(name, "review")
-                if r.get("verdict") == "problem" and self.problem_state.get(r["id"]) == "open"]
+                if r.get("verdict") == "problem" and r["id"] not in self.superseded_by
+                and self.state(r["id"]) == OPEN]
+
+    def open_questions(self, name: str) -> list[dict]:
+        return [r for r, _ in self.records_on(name, "review")
+                if r.get("verdict") == "question" and self.state(r["id"]) == OPEN]
 
     def counting_accepts(self, name: str, policy: Policy) -> list[dict]:
         out = []
         for r, s in self.records_on(name, "review"):
             if r.get("verdict") != "accept":
                 continue
-            if self.problem_state.get(r["id"]) == "withdrawn":
+            if not self.in_force(r):
                 continue
             if not (s.applies or (policy.stale_underneath and s.state == st.STALE_UNDERNEATH)):
                 continue
@@ -96,6 +158,22 @@ class Evidence:
 
     def reviewed(self, name: str, policy: Policy) -> bool:
         return bool(self.counting_accepts(name, policy)) and not self.open_problems(name)
+
+    def disagreement(self, name: str) -> bool:
+        """An acceptance in force and an open problem on the same declaration."""
+        accepts = [r for r, s in self.records_on(name, "review")
+                   if r.get("verdict") == "accept" and self.in_force(r, s)]
+        return bool(accepts) and bool(self.open_problems(name))
+
+    def checked(self, name: str) -> dict[str, list[dict]]:
+        """For each failure mode, the acceptances in force that say they checked it."""
+        out: dict[str, list[dict]] = {}
+        for r, s in self.records_on(name, "review"):
+            if r.get("verdict") == "accept" and self.in_force(r, s):
+                for mode, state in (r.get("checked") or {}).items():
+                    if state == "checked":
+                        out.setdefault(mode, []).append(r)
+        return out
 
 
 @dataclass

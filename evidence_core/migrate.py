@@ -16,7 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .dataset import Dataset
-from .records import subject_from_decl, with_id
+from .records import parse_agent, subject_from_decl, with_id
 
 
 @dataclass
@@ -46,7 +46,7 @@ def _github_by(login: str, kind: str, agent: str) -> dict:
     by = {"kind": "agent" if kind == "agent" else "person",
           "identity": {"kind": "github", "id": login}, "involvement": "unknown"}
     if kind == "agent":
-        by["agent"] = agent or "unknown agent"
+        by["agent"] = parse_agent(agent or "unknown agent")
     return by
 
 
@@ -89,13 +89,19 @@ def from_reviewed_by(records: list[dict], tests: list[dict], named: list[dict],
         if subject is None:
             rep.skipped.append(f"named {n['decl']}: not in the dataset")
             continue
-        by_agent = n.get("kind") == "agent"
+        # Named results come from roadmaps and from a bot on Zulip, not from GitHub accounts: an
+        # agent's are recorded as that agent's, and a person's need a GitHub login.
+        if n.get("kind") == "agent":
+            by = {"kind": "agent", "involvement": "unknown",
+                  "agent": parse_agent(n.get("agent") or n.get("by", "") or "unknown agent")}
+        elif n.get("by"):
+            by = _github_by(n["by"], "person", "")
+        else:
+            rep.skipped.append(f"named {n['decl']}: by nobody identifiable")
+            continue
         out = {"schema": "ltb-evidence/0", "kind": "named", "subject": subject,
                "name": n.get("name", ""), "what": n.get("what", ""), "about": n.get("about", ""),
-               "source": n.get("source", {}),
-               "by": {"kind": "agent" if by_agent else "person",
-                      "identity": {"kind": "none"}, "involvement": "unknown",
-                      **({"agent": n.get("agent") or n.get("by", "agent")} if by_agent else {})},
+               "source": n.get("source", {}), "by": by,
                "at": n.get("at", ""), "origin": {"kind": "migration", "ref": repo},
                "migration": {"from": "named/v1", **note}}
         rep.migrated.append(with_id(out))
@@ -140,11 +146,15 @@ def from_reviewed_by(records: list[dict], tests: list[dict], named: list[dict],
 
 
 def from_referee_audit(audit: dict, dataset: Dataset, reviewer: str = "") -> Report:
-    """Converts a Referee audit export. Referee records no commit and no reviewer identity; the
-    subject's hashes come from ``dataset``, and the verdict's own ``meaning`` hash is kept as the
-    meaning hash when present (Referee stamps verdicts with the proof-irrelevant semantic hash,
-    from a semantic_hash revision it does not record)."""
+    """Converts a Referee audit export. Referee records no commit and no reviewer identity: the
+    reviewer's GitHub login is required (``reviewer``), the subject's hashes come from ``dataset``,
+    and the verdict's own ``meaning`` hash is kept as the meaning hash when present (Referee stamps
+    verdicts with the proof-irrelevant semantic hash, from a semantic_hash revision it does not
+    record)."""
     rep = Report()
+    if not reviewer:
+        rep.skipped.append("a Referee audit records no reviewer: give the reviewer's GitHub login")
+        return rep
     for name, v in sorted(audit.get("verdicts", {}).items()):
         verdict = {"accepted": "accept", "query": "question"}.get(v.get("verdict"))
         if verdict is None:
@@ -161,8 +171,7 @@ def from_referee_audit(audit: dict, dataset: Dataset, reviewer: str = "") -> Rep
         out = {"schema": "ltb-evidence/0", "kind": "review", "subject": subject,
                "verdict": verdict, "rationale": v.get("note", ""),
                "by": {"kind": "person", "involvement": "unknown",
-                      "identity": ({"kind": "github", "id": reviewer} if reviewer
-                                   else {"kind": "none"})},
+                      "identity": {"kind": "github", "id": reviewer}},
                "at": v.get("at", ""), "origin": {"kind": "migration",
                                                  "ref": f"referee audit {audit.get('dataId', '')}"},
                "migration": {"from": "referee-audit/1", "hashes_from": dataset.commit}}
@@ -172,9 +181,13 @@ def from_referee_audit(audit: dict, dataset: Dataset, reviewer: str = "") -> Rep
 
 def from_trust_marks(marks: dict, datasets: dict[str, Dataset], fallback: Dataset,
                      reviewer: str = "") -> Report:
-    """Converts trust's trusted marks. Characterizations and protected declarations have no S3
-    kind in this version and are reported as skipped."""
+    """Converts trust's trusted marks, whose author is whoever committed the marks file: their
+    GitHub login is required (``reviewer``). Characterizations and protected declarations have no
+    S3 kind in this version and are reported as skipped."""
     rep = Report()
+    if not reviewer:
+        rep.skipped.append("trust marks record no reviewer: give the reviewer's GitHub login")
+        return rep
     for m in marks.get("trusted", []):
         subject, note = _subject(m["name"], m.get("commit", ""), datasets, fallback)
         if subject is None:
@@ -183,8 +196,7 @@ def from_trust_marks(marks: dict, datasets: dict[str, Dataset], fallback: Datase
         out = {"schema": "ltb-evidence/0", "kind": "review", "subject": subject,
                "verdict": "accept", "rationale": m.get("note", ""),
                "by": {"kind": "person", "involvement": "unknown",
-                      "identity": ({"kind": "github", "id": reviewer} if reviewer
-                                   else {"kind": "none"})},
+                      "identity": {"kind": "github", "id": reviewer}},
                "at": m.get("at", "") or "1970-01-01T00:00:00Z",
                "origin": {"kind": "migration", "ref": "trust-marks.json"},
                "migration": {"from": "trust-marks", **note}}

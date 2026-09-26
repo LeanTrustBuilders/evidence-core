@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import io
 import json
+import subprocess
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -20,6 +21,7 @@ from evidence_core import Dataset, Evidence, Policy, classify, coverage, queue, 
 from evidence_core import records as rec
 from evidence_core import status as st
 from evidence_core import migrate as mig
+from evidence_core import store as sto
 from evidence_core.cli import main as cli
 
 VECTORS = Path(__file__).parent / "vectors"
@@ -32,7 +34,7 @@ F = "Fixture."
 
 def review(name: str, ds: Dataset = A, verdict: str = "accept", agent: bool = False,
            at: str = "2026-09-25T10:00:00Z", **extra) -> dict:
-    by = {"kind": "agent", "agent": "test agent", "identity": {"kind": "none"}} if agent else \
+    by = {"kind": "agent", "agent": {"tool": "test agent"}} if agent else \
         {"kind": "person", "identity": {"kind": "github", "id": "tester"}}
     r = {"schema": "ltb-evidence/0", "kind": "review",
          "subject": rec.subject_from_decl(ds.by_name[F + name], ds), "verdict": verdict,
@@ -173,7 +175,7 @@ class CoverageTests(unittest.TestCase):
         self.assertEqual([d.name for d in c.with_problems], [F + "triple"])
         fixed = with_id({"schema": "ltb-evidence/0", "kind": "status", "target": problem["id"],
                          "state": "fixed", "at": "2026-09-25T12:00:00Z",
-                         "by": {"kind": "person", "identity": {"kind": "none"}}})
+                         "by": {"kind": "person", "identity": {"kind": "github", "id": "maintainer"}}})
         self.assertEqual(validate(fixed), [])
         ev = Evidence.resolve(records + [fixed], B)
         self.assertTrue(coverage(ev, F + "triple_pos").is_covered)
@@ -221,7 +223,9 @@ class MigrationTests(unittest.TestCase):
                            "meaning": A.by_name[F + "triple"].meaning},
             F + "double": {"verdict": "query", "note": "why n + n?", "at": "2026-09-01T00:00:00Z",
                            "meaning": A.by_name[F + "double"].meaning}}}
-        report = mig.from_referee_audit(audit, B)
+        # Referee's audit records no reviewer, and records are never anonymous.
+        self.assertEqual(mig.from_referee_audit(audit, B).migrated, [])
+        report = mig.from_referee_audit(audit, B, reviewer="someone")
         self.assertEqual(len(report.migrated), 2)
         for r in report.migrated:
             self.assertEqual(validate(r), [])
@@ -230,9 +234,143 @@ class MigrationTests(unittest.TestCase):
         marks = {"version": 1, "trusted": [{"name": F + "triple", "commit": "A", "note": "ok"}],
                  "characterizations": [{"definition": F + "IsSmall", "theorems": [], "note": ""}],
                  "protected": []}
-        report = mig.from_trust_marks(marks, {"A": A}, B)
+        report = mig.from_trust_marks(marks, {"A": A}, B, reviewer="someone")
         self.assertEqual(len(report.migrated), 1)
         self.assertEqual(len(report.skipped), 1)
+
+
+class IdentityTests(unittest.TestCase):
+    """Records are never anonymous: a GitHub account, an AI agent, or an agent acting through an
+    account."""
+
+    def test_who_may_make_a_record(self):
+        base = review("triple")
+        person = {"kind": "person", "identity": {"kind": "github", "id": "someone"}}
+        agent = {"kind": "agent", "agent": {"tool": "Claude Code", "model": "claude-opus-5-5"}}
+        ok = [person, agent, {**agent, "identity": {"kind": "github", "id": "operator"}}]
+        bad = [{"kind": "person"}, {"kind": "person", "identity": {"kind": "none"}},
+               {"kind": "person", "identity": {"kind": "key", "fingerprint": "ab"}},
+               {"kind": "agent", "agent": "Claude Code, Opus 5"}, {"kind": "agent"}]
+        for by in ok:
+            self.assertEqual(validate(with_id({**base, "by": by, "rationale": "r"})), [], by)
+        for by in bad:
+            self.assertNotEqual(validate(with_id({**base, "by": by, "rationale": "r"})), [], by)
+
+    def test_agent_labels(self):
+        self.assertEqual(rec.parse_agent("Claude Code, Opus 5, session 095781b9"),
+                         {"tool": "Claude Code", "model": "Opus 5", "session": "095781b9"})
+        self.assertEqual(rec.parse_agent("Voyager"), {"tool": "Voyager"})
+        self.assertEqual(rec.who({"kind": "agent", "agent": {"tool": "T", "model": "m"},
+                                  "identity": {"kind": "github", "id": "op"}}), "T (m) via op")
+
+
+def person(login: str) -> dict:
+    return {"kind": "person", "identity": {"kind": "github", "id": login}}
+
+
+def status(target: dict, state: str, by: dict, at: str) -> dict:
+    return with_id({"schema": "ltb-evidence/0", "kind": "status", "target": target["id"],
+                    "state": state, "by": by, "at": at})
+
+
+def comment(target: dict, text: str, by: dict, at: str) -> dict:
+    return with_id({"schema": "ltb-evidence/0", "kind": "comment", "text": text,
+                    "links": {"replies_to": target["id"]}, "by": by, "at": at})
+
+
+class ThreadTests(unittest.TestCase):
+    def test_supersedes_only_the_same_reviewer(self):
+        first = review("triple")
+        again = with_id({**review("triple", at="2026-09-26T10:00:00Z"), "links": {"supersedes": first["id"]},
+                         "caveats": [{"category": "F3", "note": "at 0"}]})
+        other = with_id({**review("triple_pos", at="2026-09-26T11:00:00Z"), "by": person("other"),
+                         "links": {"supersedes": review("triple_pos")["id"]}})
+        ev = Evidence.resolve([first, again, review("triple_pos"), other], B)
+        self.assertEqual(ev.superseded_by, {first["id"]: again["id"]})
+        self.assertEqual(ev.counting_accepts(F + "triple", Policy()), [again])
+        self.assertEqual(ev.counting_accepts(F + "triple", Policy(caveats=False)), [])
+        # Someone else cannot supersede a review.
+        self.assertEqual(len(ev.counting_accepts(F + "triple_pos", Policy())), 2)
+
+    def test_withdrawn_answered_and_reopened(self):
+        acc = review("triple")
+        q = review("triple", verdict="question", rationale="what is triple 0?")
+        answer = comment(q, "0, by `rfl`", person("author"), "2026-09-25T11:00:00Z")
+        records = [acc, q, answer,
+                   status(acc, "withdrawn", person("tester"), "2026-09-25T12:00:00Z"),
+                   status(q, "answered", person("tester"), "2026-09-25T12:00:00Z")]
+        ev = Evidence.resolve(records, B)
+        self.assertEqual(ev.counting_accepts(F + "triple", Policy()), [])
+        self.assertEqual(ev.open_questions(F + "triple"), [])
+        self.assertEqual(ev.replies[q["id"]], [answer])
+        self.assertIn(answer, [r for r, _ in ev.records_on(F + "triple", "comment")])
+        ev = Evidence.resolve(records + [status(q, "reopened", person("x"), "2026-09-25T13:00:00Z")], B)
+        self.assertEqual(ev.open_questions(F + "triple"), [q])
+
+    def test_disagreement_and_checklist(self):
+        acc = with_id({**review("triple"), "checked": {"F1": "checked", "F4": "unchecked"}})
+        prob = with_id({**review("triple", verdict="problem", problem={"category": "F3"}),
+                        "by": person("other")})
+        ev = Evidence.resolve([acc, prob], B)
+        self.assertTrue(ev.disagreement(F + "triple"))
+        self.assertEqual(list(ev.checked(F + "triple")), ["F1"])
+        self.assertFalse(ev.reviewed(F + "triple", Policy()))
+
+
+class StoreTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_add_load_and_conflicts(self):
+        store = sto.Store.init(self.root / "evidence", sto.default_config("o/lib", "Fixture"))
+        added = store.add([review("triple"), review("triple"),
+                           review("double", at="2026-10-01T00:00:00Z")])
+        self.assertEqual(len(added), 2)
+        self.assertEqual(sorted(p.name for p in (self.root / "evidence" / "records").glob("*.jsonl")),
+                         ["2026-09.jsonl", "2026-10.jsonl"])
+        again = sto.Store.load(self.root / "evidence")
+        self.assertEqual(again.ids, store.ids)
+        self.assertEqual(again.dataset_tag("0123456789abcdef"), "dataset-0123456789ab")
+        # The same record twice is fine; two records under one id are not.
+        line = json.dumps(added[0])
+        (self.root / "evidence" / "copy.jsonl").write_text(line + "\n")
+        sto.Store.load(self.root / "evidence")
+        (self.root / "evidence" / "bad.jsonl").write_text(json.dumps({**added[0], "at": "x"}) + "\n")
+        with self.assertRaises(sto.StoreError):
+            sto.Store.load(self.root / "evidence")
+        with self.assertRaises(sto.StoreError):
+            store.add([{**review("triple"), "by": {"kind": "person"}}])
+
+    def test_check(self):
+        a, b = review("triple"), review("double")
+        self.assertEqual(sto.check([a], [a, b], author="tester"), [])
+        self.assertTrue(any("removed" in e for e in sto.check([a, b], [a])))
+        self.assertTrue(any("changed" in e for e in sto.check([a], [{**a, "at": "2027"}])))
+        self.assertTrue(any("but the change is by" in e for e in sto.check([a], [a, b], author="else")))
+
+    def test_check_against_git(self):
+        repo = self.root / "repo"
+        repo.mkdir()
+        git = lambda *args: subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+        git("init", "-q")
+        git("config", "user.email", "t@example.org")
+        git("config", "user.name", "t")
+        store = sto.Store.init(repo / "evidence", sto.default_config("o/lib", "Fixture"))
+        store.add([review("triple")])
+        git("add", "-A")
+        git("commit", "-qm", "one")
+        store.add([review("double")])
+        before = sto.records_at(repo, "HEAD")
+        self.assertEqual(len(before), 1)
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            self.assertEqual(cli(["store-check", "--repo", str(repo), "--base", "HEAD", "--author", "tester"]), 0)
+            self.assertEqual(cli(["store-check", "--repo", str(repo), "--base", "HEAD", "--author", "else"]), 1)
+        self.assertIn("2 records, 1 new since HEAD", buf.getvalue())
 
 
 class CliTests(unittest.TestCase):

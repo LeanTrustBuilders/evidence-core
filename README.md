@@ -33,9 +33,20 @@ hashes (meaning, local, content). Against a dataset of the current code, a recor
 | `incomparable` | the record's hashes come from another hasher revision |
 | `unknown` | the record carries no meaning hash |
 
+**Threads.** The records about a declaration read as threads: each review with the comments
+replying to it and the statuses about it. A problem or question is open until a status resolves it
+(`fixed`, `intended`, `invalid`, `answered`), and can be reopened; a review can be withdrawn by its
+author, or superseded by a later review of the same reviewer. A review is **in force** when it
+applies to the current code and is neither withdrawn nor superseded. An acceptance and an open
+problem in force on one declaration are a disagreement, shown rather than resolved.
+
+**Identities.** Records are never anonymous: each names the GitHub account it came from, or is
+labelled as an AI agent's (`{tool, model, session}`), or both, for an agent acting through an
+account.
+
 **Coverage of a claim, under a reader's policy.** A claim is covered when every project declaration
-in its `meaning` closure, the claim included, has at least one acceptance that counts under the
-policy, and none has an open problem. The policy says whose reviews count: AI agents or not, authors
+in its `meaning` closure, the claim included, has at least one acceptance in force that counts under
+the policy, and none has an open problem. The policy says whose reviews count: AI agents or not, authors
 or not, acceptances with caveats or not, acceptances that are stale underneath or not, and whether
 upstream declarations must be reviewed too. Reviews are data; which ones count is the reader's
 choice.
@@ -43,7 +54,16 @@ choice.
 **The review queue:** unreviewed declarations in the claims' closures, ranked by how many claims
 rest on them, then by how many declarations use them.
 
+**Evidence stores** (`evidence_core.store`): a directory `evidence/` in a git repository, with a
+`store.json` and records in `*.jsonl` files, append-only. `Store.add` appends records by month;
+`store-check` checks a change to a store against the revision before it: every record valid, nothing
+changed or removed, and every new record by the account that made the change. The GitHub side of a
+store (issue forms, intake from issues and comments, the pull-request check) is
+[evidence-store](https://github.com/LeanTrustBuilders/evidence-store).
+
 **Migration** from existing tools: Reviewed-by's ledgers, Referee's audit exports, trust's marks.
+Referee's audits and trust's marks record no reviewer, so their migration needs the reviewer's
+GitHub login.
 
 ## Command line
 
@@ -54,10 +74,11 @@ python3 -m evidence_core queue    --dataset DS --records evidence.jsonl [--claim
 python3 -m evidence_core claims   --dataset DS
 python3 -m evidence_core diff     --old DS1 --new DS2 [--json]
 python3 -m evidence_core validate evidence.jsonl
+python3 -m evidence_core store-check --repo . --base origin/main [--author LOGIN]
 python3 -m evidence_core migrate  reviewed-by path/to/reviews/ --dataset DS --at COMMIT=DS_AT_COMMIT --repo OWNER/NAME --out evidence.jsonl
 ```
 
-`diff` classifies every project declaration of the first dataset against the second, which is how
+`--records` takes a JSONL file or an evidence store's directory. `diff` classifies every project declaration of the first dataset against the second, which is how
 the stability of the hashes is measured between commits.
 
 ## Library
