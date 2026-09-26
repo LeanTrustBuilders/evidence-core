@@ -171,43 +171,56 @@ def cmd_queue(args) -> int:
 
 
 def cmd_claims(args) -> int:
+    from . import claims as claims_mod
     ds = Dataset.load(args.dataset)
-    for name, payloads in sorted(ds.annotations("claim").items()):
-        ref = (payloads[0] or {}).get("reference", "") if payloads else ""
-        print(f"{name}" + (f"  ({ref})" if ref else ""))
+    store_claims = None
+    if args.store:
+        from .store import Store
+        store_claims = Store.load(args.store).config.get("claims") or None
+    names = {d.name for d in ds.decls if d.is_project}
+    cl = claims_mod.resolve(Path(args.source) if args.source else None, names, explicit=args.claim,
+                            annotations=ds.annotations("claim"), store_claims=store_claims)
+    if args.json:
+        print(json.dumps({"claims": [c.as_json() for c in cl.claims], "scope": cl.scope, "sources": cl.sources,
+                          "warnings": cl.warnings}, indent=1, ensure_ascii=False))
+        return 0
+    for c in cl.claims:
+        print(f"{c.decl}  [{c.source}]" + (f"  {c.label or c.reference}" if c.label or c.reference else "")
+              + ("" if c.found else "  (not in the dataset)"))
+    for w in cl.warnings:
+        print(f"warning: {w}", file=sys.stderr)
     return 0
 
 
 def cmd_diff(args) -> int:
+    from .changes import compare
     old, new = Dataset.load(args.old), Dataset.load(args.new)
-    counts: Counter = Counter()
-    examples: dict[str, list[str]] = {}
-    for d in old.decls:
-        if not d.is_project:
-            continue
-        subject = {"name": d.name, "hashes": {"meaning": d.meaning, "local": d.local},
-                   "kind": st.subject_kind_of(d), "hasher": old.hasher}
-        s = st.classify(subject, new)
-        state = s.state
-        if state == st.CURRENT and new.by_name[d.name].content != d.content:
-            state = "current (proof changed)"
-        counts[state] += 1
-        examples.setdefault(state, []).append(d.name if state != st.RENAMED else
-                                              f"{d.name} → {s.decl.name}")
-    added = [d.name for d in new.decls if d.is_project and d.name not in old.by_name]
-    renamed_to = {e.split(" → ")[1] for e in examples.get(st.RENAMED, [])}
-    added = [n for n in added if n not in renamed_to]
-    report = {"old": old.commit, "new": new.commit, "project_old": sum(counts.values()),
-              "counts": dict(counts), "added": len(added)}
+    ch = compare(new, old)
+    summary = ch.summary
     if args.json:
-        report["examples"] = {k: v[: args.examples] for k, v in examples.items()}
-        report["added_examples"] = added[: args.examples]
-        print(json.dumps(report, indent=1))
+        out = {"old": old.commit, "new": new.commit, "counts": summary["counts"],
+               "comparable": summary["comparable"],
+               "examples": {k: v[: args.examples] for k, v in summary["lists"].items() if v}}
+        print(json.dumps(out, indent=1))
     else:
-        print(f"{old.commit[:10]} → {new.commit[:10]}: {report['project_old']} project declarations")
-        for k, v in sorted(counts.items(), key=lambda kv: -kv[1]):
-            print(f"  {k:24} {v}")
-        print(f"  {'added':24} {len(added)}")
+        print(f"{old.commit[:10]} → {new.commit[:10]}: {summary['baseline']['decls']} → "
+              f"{summary['current']['decls']} project declarations")
+        for k, v in summary["counts"].items():
+            print(f"  {k:12} {v}")
+        if not summary["comparable"]:
+            print("  (the two datasets' hashes are not comparable: different hashers)")
+    return 0
+
+
+def cmd_ledger(args) -> int:
+    from . import ledger as ledger_mod
+    led = ledger_mod.load(Path(args.ledger))
+    ds = Dataset.load(args.dataset)
+    if ledger_mod.record(led, ds, date=args.date, label=args.label):
+        ledger_mod.save(led, Path(args.ledger))
+        print(f"recorded the build of {ds.commit[:12]} ({len(led['builds'])} builds)")
+    else:
+        print(f"{ds.commit[:12]} is already the last build")
     return 0
 
 
@@ -277,9 +290,21 @@ def main(argv: list[str] | None = None) -> int:
     policy_args(q)
     q.set_defaults(fn=cmd_queue)
 
-    q = sub.add_parser("claims", help="the @[claim] declarations of a dataset")
+    q = sub.add_parser("claims", help="what a library claims: from a store, formalization.yaml, "
+                                      "Comparator configs and @[claim]")
     q.add_argument("--dataset", required=True)
+    q.add_argument("--source", help="a checkout of the library (for formalization.yaml and Comparator configs)")
+    q.add_argument("--store", help="an evidence store, whose claims come first")
+    q.add_argument("--claim", action="append", help="name the claims instead")
+    q.add_argument("--json", action="store_true")
     q.set_defaults(fn=cmd_claims)
+
+    q = sub.add_parser("ledger", help="record a build in a provenance ledger (when each meaning changed)")
+    q.add_argument("--ledger", required=True, help="the ledger file (created if missing)")
+    q.add_argument("--dataset", required=True)
+    q.add_argument("--date", default="")
+    q.add_argument("--label", default="")
+    q.set_defaults(fn=cmd_ledger)
 
     q = sub.add_parser("diff", help="how project declarations moved between two datasets")
     q.add_argument("--old", required=True)

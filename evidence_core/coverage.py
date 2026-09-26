@@ -32,10 +32,31 @@ class Policy:
     upstream: bool = False
 
 
+#: The policy's switches that decide whether a review counts (``upstream`` decides instead which
+#: declarations a claim requires), in the order of a policy's key.
+POLICY_SWITCHES = ("agents", "stale_underneath", "caveats", "authors")
+
+
+def policy_key(policy: Policy) -> str:
+    """The policy's switches as a string of 0s and 1s, in the order of ``POLICY_SWITCHES``: the key
+    under which a page stores what a policy decides."""
+    return "".join("1" if getattr(policy, k) else "0" for k in POLICY_SWITCHES)
+
+
+def all_policies() -> list[Policy]:
+    """Every setting of the switches: a static page computes each once, and the reader picks one."""
+    return [Policy(**{k: bool(n >> (len(POLICY_SWITCHES) - 1 - i) & 1) for i, k in enumerate(POLICY_SWITCHES)})
+            for n in range(1 << len(POLICY_SWITCHES))]
+
+
 #: The state a record is in when it has no status: a problem or question is open, anything else
 #: stands.
 OPEN = "open"
 STANDS = "stands"
+#: Where a declaration stands under a policy (``Evidence.decl_state``).
+COVERED, UNCOUNTED, STALE, UNREVIEWED, PROBLEM, DISPUTED = \
+    "covered", "uncounted", "stale", "unreviewed", "problem", "disputed"
+DECL_STATES = (COVERED, UNCOUNTED, STALE, UNREVIEWED, PROBLEM, DISPUTED)
 
 
 @dataclass
@@ -159,6 +180,33 @@ class Evidence:
 
     def reviewed(self, name: str, policy: Policy) -> bool:
         return bool(self.counting_accepts(name, policy)) and not self.open_problems(name)
+
+    def decl_state(self, name: str, policy: Policy) -> str:
+        """Where a declaration stands under a policy: ``problem`` (an open problem), ``disputed`` (an
+        open problem and an acceptance in force), ``covered`` (a review that counts), ``uncounted``
+        (current acceptances, none of which the policy counts), ``stale`` (acceptances only of
+        earlier versions) or ``unreviewed``."""
+        accepts = [(r, s) for r, s in self.records_on(name, "review")
+                   if r.get("verdict") == "accept" and self.in_force(r)]
+        if self.open_problems(name):
+            return DISPUTED if any(s.applies for _, s in accepts) else PROBLEM
+        if self.counting_accepts(name, policy):
+            return COVERED
+        if any(s.applies for _, s in accepts):
+            return UNCOUNTED
+        return STALE if accepts else UNREVIEWED
+
+    def why_uncounted(self, name: str, policy: Policy) -> str:
+        """Why the current acceptances of an ``uncounted`` declaration do not count: ``agents`` (all by
+        AI agents, which the policy does not count), ``authors`` (all by its authors), else
+        ``policy``."""
+        live = [r for r, s in self.records_on(name, "review")
+                if r.get("verdict") == "accept" and self.in_force(r, s)]
+        if live and not policy.agents and all(r.get("by", {}).get("kind") == "agent" for r in live):
+            return "agents"
+        if live and not policy.authors and all(r.get("by", {}).get("involvement") == "author" for r in live):
+            return "authors"
+        return "policy"
 
     def disagreement(self, name: str) -> bool:
         """An acceptance in force and an open problem on the same declaration."""

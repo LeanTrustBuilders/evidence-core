@@ -439,12 +439,21 @@ class CliTests(unittest.TestCase):
         out = json.loads(self.run_cli("diff", "--old", str(VECTORS / "fixture-a"),
                                       "--new", str(VECTORS / "fixture-b"), "--json"))
         c = out["counts"]
-        self.assertEqual(c["stale"], 2)              # double, triple_one
+        self.assertEqual((c["body"], c["statement"]), (1, 1))     # double; triple_one
         # double_zero, double_triple, isDouble_double, double_two
-        self.assertEqual(c["stale-underneath"], 4)
+        self.assertEqual(c["underneath"], 4)
         self.assertEqual(c["renamed"], 1)            # triple_three → triple_three'
-        self.assertEqual(c["current (proof changed)"], 1)  # triple_two
-        self.assertEqual(out["added"], 0)
+        self.assertEqual(c["proof"], 1)              # triple_two
+        self.assertEqual((c["added"], c["removed"]), (0, 0))
+        self.assertTrue(out["comparable"])
+
+    def test_claims_and_ledger(self):
+        out = json.loads(self.run_cli("claims", "--dataset", str(VECTORS / "fixture-b"), "--json"))
+        self.assertEqual([(c["decl"], c["source"]) for c in out["claims"]], [(F + "triple_pos", "annotation")])
+        with tempfile.TemporaryDirectory() as d:
+            led = Path(d) / "ledger.json"
+            self.assertIn("recorded", self.run_cli("ledger", "--ledger", str(led), "--dataset", str(VECTORS / "fixture-a")))
+            self.assertIn("already", self.run_cli("ledger", "--ledger", str(led), "--dataset", str(VECTORS / "fixture-a")))
 
     def test_status_and_coverage(self):
         with tempfile.TemporaryDirectory() as d:

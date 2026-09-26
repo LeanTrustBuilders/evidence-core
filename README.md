@@ -76,6 +76,26 @@ changed or removed, and every new record by the account that made the change. Th
 store (issue forms, intake from issues and comments, the pull-request check) is
 [evidence-store](https://github.com/LeanTrustBuilders/evidence-store).
 
+**For pages.** Every front end (the Referee-style site and claim page of
+[referee-site](https://github.com/LeanTrustBuilders/referee-site), the Reviewed-by page of
+[reviewed-by-pilot](https://github.com/LeanTrustBuilders/reviewed-by-pilot), the index trust-web
+reads) takes what it shows from here, and only chooses how to display it:
+- `views`: each record as a page shows it (`record_view`): who made it, a link to where it came from
+  (`records.origin_url`), its status against the dataset, its latest state, whether it is in force
+  or superseded, its replies and statuses, and the changes of state it allows now (`actions`);
+- `Evidence.decl_state`: where a declaration stands under a policy (covered, uncounted, stale,
+  unreviewed, problem, disputed), and `why_uncounted`; `all_policies()` and `policy_key` let a
+  static page compute every policy once and let the reader pick one;
+- `claims`: what a library claims, from an evidence store's list, `formalization.yaml` (with
+  PyYAML: `pip install 'evidence-core[yaml]'`), Comparator configs and `@[claim]`;
+- `changes`: what changed between two datasets, in the classes a returning reader needs (statement,
+  body, underneath, proof only, renamed, added, removed);
+- `ledger`: provenance across builds, when each declaration's meaning last changed;
+- `analysis`: closures split into project and upstream, whether a `sorry` is a declaration's own,
+  specifications and characterizations, the scope of a claims-only page, trusted packages;
+- `source`: a declaration's text from the `source` facet and a checkout, with or without its doc
+  comment, and its statement apart from its proof (`split_statement`).
+
 **Migration** from existing tools: Reviewed-by's ledgers, Referee's audit exports, trust's marks.
 Referee's audits and trust's marks record no reviewer, so their migration needs the reviewer's
 GitHub login.
@@ -86,8 +106,9 @@ GitHub login.
 python3 -m evidence_core status   --dataset DS --records evidence.jsonl [--at OLD_DS]
 python3 -m evidence_core coverage --dataset DS --records evidence.jsonl [--claim NAME] [--agents] [--stale-underneath]
 python3 -m evidence_core queue    --dataset DS --records evidence.jsonl [--claim NAME]
-python3 -m evidence_core claims   --dataset DS
+python3 -m evidence_core claims   --dataset DS [--source CHECKOUT] [--store evidence] [--json]
 python3 -m evidence_core diff     --old DS1 --new DS2 [--json]
+python3 -m evidence_core ledger   --ledger ledger.json --dataset DS [--date D] [--label L]
 python3 -m evidence_core validate evidence.jsonl
 python3 -m evidence_core check-graph   --old DS1 --new DS2 [--strict]
 python3 -m evidence_core compare-rules --a DS_RULE_A --b DS_RULE_B
@@ -96,8 +117,9 @@ python3 -m evidence_core migrate  reviewed-by path/to/reviews/ --dataset DS --at
 ```
 
 `--records` takes a JSONL file or an evidence store's directory. `diff` classifies every project
-declaration of the first dataset against the second, which is how the stability of the hashes is
-measured between commits.
+declaration of the first dataset against the second (`changes`), which is how the stability of the
+hashes is measured between commits. `ledger` records a build in a provenance ledger, which a site
+carries from build to build.
 
 Two self-checks of the suite (dependency-testing.md §9 in the design notes):
 - `check-graph` (check 1): over two datasets of consecutive commits, the declarations whose meaning

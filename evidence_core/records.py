@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Iterable
 
@@ -61,6 +62,28 @@ def agent_label(agent: dict | str | None) -> str:
     if isinstance(agent, str):
         return agent
     return agent.get("tool", "agent") + (f" ({agent['model']})" if agent.get("model") else "")
+
+
+def origin_issue(ref: str) -> tuple[str, int | None]:
+    """(repository, issue number) of a record's origin reference (S3 ``origin.ref``): ``owner/repo#12``,
+    ``owner/repo#12/event/5`` (a close or reopen), or the URL of an issue or of a comment on one (with
+    ``/line/k`` for one line of a comment)."""
+    m = re.search(r"github\.com/([^/]+/[^/]+)/issues/(\d+)", ref or "")
+    if m:
+        return m.group(1), int(m.group(2))
+    repo, _, rest = (ref or "").partition("#")
+    number = re.match(r"\d+", rest)
+    return (repo, int(number.group(0))) if number and "/" in repo else (repo, None)
+
+
+def origin_url(origin: dict | None) -> str:
+    """Where a record came from, as a link: the comment it was read from, else its issue; empty for
+    an origin that is not on GitHub."""
+    ref = (origin or {}).get("ref", "")
+    if ref.startswith("https://"):
+        return re.sub(r"/line/\d+$", "", ref)
+    repo, number = origin_issue(ref)
+    return f"https://github.com/{repo}/issues/{number}" if repo and number else ""
 
 
 def who(by: dict) -> str:

@@ -4,11 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "evidence-core"
-version = "0.4.0"
+version = "0.5.0"
 description = "Pure functions over LeanTrustBuilders datasets and evidence records"
 requires-python = ">=3.10"
 license = {text = "Apache-2.0"}
 dependencies = []
+
+[project.optional-dependencies]
+yaml = ["pyyaml>=6"]
 
 [project.scripts]
 evidence-core = "evidence_core.cli:main"
