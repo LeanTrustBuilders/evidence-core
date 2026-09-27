@@ -1,5 +1,10 @@
 """Self-checks over datasets (dependency-testing.md §9 in LeanTrustBuilders/design).
 
+**The kernel check** (check 2) is `trust-extract check`: Lean's kernel checks each project
+declaration against its closure as the dataset records it, and the dataset keeps the result as a
+facet. `kernel` and `kernel_summary` read it, for a page to say whether what it shows a declaration
+rests on is all it rests on.
+
 **Graph against hash** (check 1). The meaning hash is deep: it changes when anything a declaration's
 meaning rests on changes. The `meaning` graph says what that is. Over two datasets of consecutive
 commits, the two must agree, for every project declaration D present in both:
@@ -248,3 +253,68 @@ def compare_rules(a: Dataset, b: Dataset, notion: str = "meaning", examples: int
                           added_by_kind=dict(added), closure_a=ca, closure_b=cb,
                           lost_project=lost, gained_project=gained,
                           examples_removed=ex_rem, examples_added=ex_add)
+
+
+# --- the kernel check (check 2) ---------------------------------------------------------------------
+
+#: What `trust-extract check` says of a declaration (facet `check.kernel.<notion>`, schema
+#: `check.kernel/1`): its closure is enough for the kernel (`ok`), lacks constants the kernel needed
+#: (`missing`), the kernel rejected it for another reason (`error`), or it was not checked (`skipped`).
+KERNEL_STATES = ("ok", "missing", "error", "skipped")
+
+
+def kernel_notions(ds: Dataset) -> list[str]:
+    """The notions the dataset's closures were checked along by Lean's kernel (`meaning`, `term`)."""
+    return [f["name"].split(".", 2)[2] for f in ds.meta.get("facets", []) if f["name"].startswith("check.kernel.")]
+
+
+def kernel(ds: Dataset, name: str, notion: str = "meaning") -> dict | None:
+    """The kernel check of a declaration along a notion: ``{kernel, missing?, error?, unlisted?}``,
+    or None when it was not checked."""
+    return ds.facet_row(f"check.kernel.{notion}", name)
+
+
+@dataclass
+class KernelSummary:
+    """The kernel check over a set of project declarations (a claim's closure, a whole library)."""
+    notion: str
+    declarations: int
+    ok: int = 0
+    missing: list[str] = field(default_factory=list)
+    error: list[str] = field(default_factory=list)
+    skipped: list[str] = field(default_factory=list)
+    #: declarations with no row: not checked (added after the check, or outside what it covered)
+    unchecked: list[str] = field(default_factory=list)
+    #: declarations that pass but mention, through helpers, something their closure lacks
+    unlisted: list[str] = field(default_factory=list)
+
+    @property
+    def all_ok(self) -> bool:
+        return self.ok == self.declarations
+
+    def as_json(self, limit: int = 100) -> dict:
+        return {"notion": self.notion, "declarations": self.declarations, "ok": self.ok,
+                **{k: getattr(self, k)[:limit] for k in ("missing", "error", "skipped", "unchecked", "unlisted")},
+                "counts": {k: len(getattr(self, k)) for k in ("missing", "error", "skipped", "unchecked", "unlisted")}}
+
+
+def kernel_summary(ds: Dataset, notion: str = "meaning", names=None) -> KernelSummary | None:
+    """The kernel check of ``names`` (default: every project declaration) along a notion; None when
+    the dataset was not checked along it."""
+    if notion not in kernel_notions(ds):
+        return None
+    rows = ds.facet(f"check.kernel.{notion}")
+    names = [d.name for d in ds.decls if d.is_project] if names is None else \
+        [n for n in names if n in ds.by_name and ds.by_name[n].is_project]
+    out = KernelSummary(notion=notion, declarations=len(names))
+    for n in names:
+        row = (rows.get(n) or [None])[0]
+        if row is None:
+            out.unchecked.append(n)
+        elif row.get("kernel") == "ok":
+            out.ok += 1
+            if row.get("unlisted"):
+                out.unlisted.append(n)
+        else:
+            getattr(out, row.get("kernel") if row.get("kernel") in ("missing", "error", "skipped") else "error").append(n)
+    return out

@@ -263,5 +263,38 @@ class OriginTests(unittest.TestCase):
         self.assertEqual(rec.origin_url(None), "")
 
 
+class KernelCheckTests(unittest.TestCase):
+    """The kernel check's facet (written by `trust-extract check`), read for pages."""
+
+    def setUp(self):
+        import shutil
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name) / "ds"
+        shutil.copytree(V / "fixture-b", root)
+        meta = json.loads((root / "meta.json").read_text())
+        meta["facets"].append({"name": "check.kernel.meaning", "file": "facets/check.kernel.meaning.jsonl",
+                               "schema": "check.kernel/1", "count": 3})
+        (root / "meta.json").write_text(json.dumps(meta))
+        rows = [{"decl": F + "double", "kernel": "ok"},
+                {"decl": F + "double_triple", "kernel": "missing", "missing": [F + "triple"]},
+                {"decl": F + "triple", "kernel": "ok", "unlisted": ["Fixture.helper"]}]
+        (root / "facets" / "check.kernel.meaning.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+        self.ds = Dataset.load(root)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_a_declaration_and_a_set_of_them(self):
+        from evidence_core.checks import kernel, kernel_notions, kernel_summary
+        self.assertEqual(kernel_notions(self.ds), ["meaning"])
+        self.assertEqual(kernel(self.ds, F + "double_triple")["missing"], [F + "triple"])
+        self.assertIsNone(kernel(self.ds, F + "double", "term"))
+        s = kernel_summary(self.ds, "meaning", [F + "double", F + "double_triple", F + "triple", F + "triple_one", "Nat"])
+        self.assertEqual((s.declarations, s.ok, s.missing, s.unchecked, s.unlisted),
+                         (4, 2, [F + "double_triple"], [F + "triple_one"], [F + "triple"]))
+        self.assertFalse(s.all_ok)
+        self.assertIsNone(kernel_summary(self.ds, "term"))
+
+
 if __name__ == "__main__":
     unittest.main()

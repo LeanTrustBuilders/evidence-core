@@ -93,6 +93,8 @@ reads) takes what it shows from here, and only chooses how to display it:
 - `ledger`: provenance across builds, when each declaration's meaning last changed;
 - `analysis`: closures split into project and upstream, whether a `sorry` is a declaration's own,
   specifications and characterizations, the scope of a claims-only page, trusted packages;
+- `checks`: the kernel check's results (facet `check.kernel.<notion>`, written by `trust-extract check`),
+  per declaration (`kernel`) and over a claim's closure or a library (`kernel_summary`);
 - `source`: a declaration's text from the `source` facet and a checkout, with or without its doc
   comment, and its statement apart from its proof (`split_statement`).
 - `docs`: a library's own documentation: module docstrings read as their sections (title, summary,
