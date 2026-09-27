@@ -85,6 +85,12 @@ class AttributeTests(unittest.TestCase):
             self.assertEqual(docs.links(ds, F + "double").as_json(),
                              {"stacks": [{"tag": "09GA", "comment": "the doubling map"}], "wikidata": ["Q616608"]})
             self.assertEqual(docs.deprecated(ds), {F + "triple"})
+            self.assertEqual(docs.links(ds, F + "triple").as_json(), {"deprecated": {"since": "2026-01-01"}})
+
+    def test_what_a_deprecation_says(self):
+        self.assertEqual(docs.deprecation('(since := "2025-01-01")'), (None, "2025-01-01", None))
+        self.assertEqual(docs.deprecation('"Use foo instead" (since := "2025-01-01")'), (None, "2025-01-01", "Use foo instead"))
+        self.assertEqual(docs.deprecation('eq_symm_apply +typeChanged (since := "2026-07-26")'), ("eq_symm_apply", "2026-07-26", None))
 
 
 class CatalogTests(unittest.TestCase):

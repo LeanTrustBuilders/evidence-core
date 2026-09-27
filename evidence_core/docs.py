@@ -206,11 +206,16 @@ def module_docs(ds: Dataset) -> dict[str, ModuleDoc]:
 
 @dataclass(frozen=True)
 class Links:
-    """Where a declaration is also described: Stacks project and Kerodon tags, Wikidata items."""
+    """Where a declaration is also described (Stacks project and Kerodon tags, Wikidata items), and
+    whether it is deprecated: kept only for compatibility, with what replaces it, since when, and
+    the deprecation's message."""
     stacks: tuple[tuple[str, str], ...] = ()      # (tag, comment)
     kerodon: tuple[tuple[str, str], ...] = ()
     wikidata: tuple[str, ...] = ()
     deprecated: bool = False
+    replacement: str | None = None
+    since: str | None = None
+    message: str | None = None
 
     def as_json(self) -> dict:
         out = {}
@@ -220,7 +225,8 @@ class Links:
         if self.wikidata:
             out["wikidata"] = list(self.wikidata)
         if self.deprecated:
-            out["deprecated"] = True
+            out["deprecated"] = {k: v for k, v in (("replacement", self.replacement), ("since", self.since),
+                                                    ("message", self.message)) if v} or True
         return out
 
 
@@ -230,12 +236,39 @@ def _tag(args: str) -> tuple[str, str]:
     return tag.strip(), rest[1:-1] if rest.startswith('"') and rest.endswith('"') else rest
 
 
-def links(ds: Dataset, name: str) -> Links:
+def deprecation(args: str) -> tuple[str | None, str | None, str | None]:
+    """(replacement as written, since, message) of `@[deprecated …]`'s arguments:
+    `(since := "2025-01-01")`, `"Use foo" (since := …)`, `newName +typeChanged (since := …)`."""
+    since = re.search(r'since\s*:=\s*"([^"]*)"', args)
+    message = re.match(r'\s*"([^"]*)"', args)
+    replacement = re.match(r"\s*([^\W\d][\w.'!?₀-₉]*)", args)
+    return (replacement.group(1) if replacement else None, since.group(1) if since else None,
+            message.group(1) if message else None)
+
+
+def links(ds: Dataset, name: str, resolver: Resolver | None = None) -> Links:
+    """What the attributes say of a declaration. The replacement of a deprecated one is the name its
+    attribute gives (resolved like a docstring's names, given a resolver), else, for a deprecated
+    alias, the one declaration it stands for."""
     attrs = (ds.facet_row("attributes", name) or {}).get("attributes", [])
+    dep = next((a for a in attrs if a["name"] == "deprecated"), None)
+    replacement = since = message = None
+    if dep is not None:
+        replacement, since, message = deprecation(dep["args"])
+        if replacement and replacement not in ds.by_name:
+            d = ds.by_name.get(name)
+            replacement = resolver.resolve(replacement, d.module) if resolver and d else None
+        if replacement is None and "term" in ds.notions() and name in ds.by_name:
+            # An alias's value is the declaration it stands for: what it uses beyond its statement.
+            i = ds.by_name[name].id
+            stated = set(ds.edges("statement").get(i, ())) if "statement" in ds.notions() else set()
+            beyond = [t for t in ds.edges("term").get(i, ()) if t not in stated and t != i and ds.decls[t].is_project]
+            if len(beyond) == 1:
+                replacement = ds.decls[beyond[0]].name
     return Links(stacks=tuple(_tag(a["args"]) for a in attrs if a["name"] == "stacks"),
                  kerodon=tuple(_tag(a["args"]) for a in attrs if a["name"] == "kerodon"),
                  wikidata=tuple(a["args"].split()[0] for a in attrs if a["name"] == "wikidata" and a["args"]),
-                 deprecated=any(a["name"] == "deprecated" for a in attrs))
+                 deprecated=dep is not None, replacement=replacement, since=since, message=message)
 
 
 def deprecated(ds: Dataset) -> set[str]:
