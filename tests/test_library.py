@@ -201,6 +201,31 @@ class AnalysisTests(unittest.TestCase):
         self.assertTrue(analysis.is_characterized(chars))
         self.assertIn(F + "isDouble_double", chars[0]["existence"])
 
+    def test_a_characterization_stated_by_one_theorem(self):
+        # Payloads as TrustAnnotations writes them for `@[characterization]` with no keyword.
+        def payload(decl, target, form, conditions, relation):
+            return {"role": "theorem", "property": decl, "target": target, "relation": relation,
+                    "relationHead": "Eq", "comment": "", "form": form, "candidate": "m",
+                    "conditions": conditions, "context": ["0 < n"],
+                    "complete": all(k["proved"] for k in conditions)}
+
+        class Stub:
+            def annotations(self, attr):
+                return {} if attr != "characterization" else {
+                    "eq_double_iff": [payload("eq_double_iff", "double", "iff",
+                                              [{"text": "m = n + n", "proved": True, "by": []}], "m = double n")],
+                    "eq_quad": [payload("eq_quad", "quad", "uniqueness",
+                                        [{"text": "4 ∣ m", "proved": True, "by": ["quad.dvd"]},
+                                         {"text": "m / 4 = n", "proved": False, "by": []}], "m = quad n")]}
+
+        chars = analysis.characterizations(Stub())
+        [d] = chars["double"]
+        self.assertTrue(analysis.is_characterized(chars["double"]))
+        self.assertEqual((d["existence"], d["uniqueness"]), (["eq_double_iff"], [{"decl": "eq_double_iff", "relation": "m = double n"}]))
+        [q] = chars["quad"]
+        self.assertFalse(analysis.is_characterized(chars["quad"]))
+        self.assertEqual((q["existence"], q["open"], q["context"]), (["quad.dvd"], ["m / 4 = n"], ["0 < n"]))
+
     def test_sorry_and_closures(self):
         self.assertEqual(analysis.sorry_of(B, F + "double"), analysis.Sorry(False, False))
         project, upstream = analysis.Closures(B).of(B.by_name[F + "double_zero"].id)

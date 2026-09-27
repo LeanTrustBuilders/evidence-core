@@ -96,29 +96,45 @@ def specifications(ds: Dataset) -> dict[str, list[dict]]:
 
 
 def characterizations(ds: Dataset) -> dict[str, list[dict]]:
-    """Each definition characterized by a property (`@[characterization]`): per property,
-    ``{property, target, comment, existence: [decl], uniqueness: [{decl, relation}]}``. A definition
-    is characterized when some property has both an existence and a uniqueness theorem."""
+    """Each definition's characterizations (`@[characterization]`), per characterization:
+    ``{property, target, comment, existence: [decl], uniqueness: [{decl, relation}], complete, open, context}``.
+
+    With a predicate (`@[characterization property d]`), the parts are assembled per predicate, and a
+    characterization is complete when it has both an existence and a uniqueness theorem. Stated by one
+    theorem (role ``theorem``, no predicate), the theorem is both the property and the uniqueness half:
+    ``existence`` lists the `@[specifies]` theorems that showed the definition satisfies each condition
+    (the theorem itself when reflexivity did), ``open`` the conditions nothing showed, and ``context``
+    the hypotheses that are not about the candidate, where the characterization holds."""
     by_prop: dict[tuple, dict] = {}
     for decl, payloads in ds.annotations("characterization").items():
         for p in payloads:
             key = (p.get("property"), p.get("target"))
             c = by_prop.setdefault(key, {"property": p.get("property"), "target": p.get("target"),
-                                         "comment": "", "existence": [], "uniqueness": []})
+                                         "comment": "", "existence": [], "uniqueness": [],
+                                         "open": [], "context": []})
             if p.get("role") == "property":
                 c["comment"] = p.get("comment", "")
             elif p.get("role") == "existence":
                 c["existence"].append(decl)
             elif p.get("role") == "uniqueness":
                 c["uniqueness"].append({"decl": decl, "relation": p.get("relation", "")})
+            elif p.get("role") == "theorem":
+                conds = p.get("conditions", [])
+                shown = list(dict.fromkeys(b for k in conds if k.get("proved") for b in k.get("by", [])))
+                c.update(comment=p.get("comment", ""), form=p.get("form", ""),
+                         existence=shown or ([decl] if p.get("complete") else []),
+                         uniqueness=[{"decl": decl, "relation": p.get("relation", "")}],
+                         complete=bool(p.get("complete")), context=p.get("context", []),
+                         open=[k.get("text", "") for k in conds if not k.get("proved")])
     out: dict[str, list[dict]] = defaultdict(list)
     for (_, target), c in by_prop.items():
+        c.setdefault("complete", bool(c["existence"] and c["uniqueness"]))
         out[target].append(c)
     return dict(out)
 
 
 def is_characterized(chars: list[dict]) -> bool:
-    return any(c["existence"] and c["uniqueness"] for c in chars)
+    return any(c["complete"] for c in chars)
 
 
 def evidence_targets(ds: Dataset) -> dict[str, set[str]]:
