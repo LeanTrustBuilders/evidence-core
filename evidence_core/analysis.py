@@ -97,21 +97,24 @@ def specifications(ds: Dataset) -> dict[str, list[dict]]:
 
 def characterizations(ds: Dataset) -> dict[str, list[dict]]:
     """Each definition's characterizations (`@[characterization]`), per characterization:
-    ``{property, target, comment, existence: [decl], uniqueness: [{decl, relation}], complete, open, context}``.
+    ``{property, target, comment, existence: [decl], uniqueness: [{decl, relation}], complete, open, context,
+    assuming}``.
 
     With a predicate (`@[characterization property d]`), the parts are assembled per predicate, and a
     characterization is complete when it has both an existence and a uniqueness theorem. Stated by one
     theorem (role ``theorem``, no predicate), the theorem is both the property and the uniqueness half:
     ``existence`` lists the `@[specifies]` theorems that showed the definition satisfies each condition
-    (the theorem itself when reflexivity did), ``open`` the conditions nothing showed, and ``context``
-    the hypotheses that are not about the candidate, where the characterization holds."""
+    (the theorem itself when reflexivity did), ``open`` the conditions nothing showed, ``context``
+    the hypotheses that are not about the candidate, where the characterization holds, and
+    ``assuming`` the premises of those `@[specifies]` theorems that were assumed rather than shown:
+    where the definition has the property."""
     by_prop: dict[tuple, dict] = {}
     for decl, payloads in ds.annotations("characterization").items():
         for p in payloads:
             key = (p.get("property"), p.get("target"))
             c = by_prop.setdefault(key, {"property": p.get("property"), "target": p.get("target"),
                                          "comment": "", "existence": [], "uniqueness": [],
-                                         "open": [], "context": []})
+                                         "open": [], "context": [], "assuming": []})
             if p.get("role") == "property":
                 c["comment"] = p.get("comment", "")
             elif p.get("role") == "existence":
@@ -125,7 +128,8 @@ def characterizations(ds: Dataset) -> dict[str, list[dict]]:
                          existence=shown or ([decl] if p.get("complete") else []),
                          uniqueness=[{"decl": decl, "relation": p.get("relation", "")}],
                          complete=bool(p.get("complete")), context=p.get("context", []),
-                         open=[k.get("text", "") for k in conds if not k.get("proved")])
+                         open=[k.get("text", "") for k in conds if not k.get("proved")],
+                         assuming=list(dict.fromkeys(a for k in conds for a in k.get("assuming", []))))
     out: dict[str, list[dict]] = defaultdict(list)
     for (_, target), c in by_prop.items():
         c.setdefault("complete", bool(c["existence"] and c["uniqueness"]))

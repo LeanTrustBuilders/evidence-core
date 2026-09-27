@@ -215,7 +215,7 @@ class AnalysisTests(unittest.TestCase):
                     "eq_double_iff": [payload("eq_double_iff", "double", "iff",
                                               [{"text": "m = n + n", "proved": True, "by": []}], "m = double n")],
                     "eq_quad": [payload("eq_quad", "quad", "uniqueness",
-                                        [{"text": "4 ∣ m", "proved": True, "by": ["quad.dvd"]},
+                                        [{"text": "4 ∣ m", "proved": True, "by": ["quad.dvd"], "assuming": ["0 < n"]},
                                          {"text": "m / 4 = n", "proved": False, "by": []}], "m = quad n")]}
 
         chars = analysis.characterizations(Stub())
@@ -225,6 +225,7 @@ class AnalysisTests(unittest.TestCase):
         [q] = chars["quad"]
         self.assertFalse(analysis.is_characterized(chars["quad"]))
         self.assertEqual((q["existence"], q["open"], q["context"]), (["quad.dvd"], ["m / 4 = n"], ["0 < n"]))
+        self.assertEqual((q["assuming"], d["assuming"]), (["0 < n"], []))
 
     def test_sorry_and_closures(self):
         self.assertEqual(analysis.sorry_of(B, F + "double"), analysis.Sorry(False, False))

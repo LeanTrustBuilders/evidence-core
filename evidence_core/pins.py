@@ -44,7 +44,8 @@ class Pins:
         for c in self.chars.get(name, []):
             out.append({"source": CODE, "kind": "characterization", "decl": c["property"], "comment": c["comment"],
                         "existence": c["existence"], "uniqueness": c["uniqueness"],
-                        "complete": c["complete"], "open": c["open"], "context": c["context"]})
+                        "complete": c["complete"], "open": c["open"], "context": c["context"],
+                        "assuming": c["assuming"]})
         for row in self.examples.get(name, []):
             for ex in row.get("examples", []):
                 out.append({"source": CODE, "kind": "unit test", "statement": ex["statement"], "path": ex["path"],
