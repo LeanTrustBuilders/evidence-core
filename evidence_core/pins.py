@@ -13,8 +13,13 @@ lists them together, each marked by where it comes from:
   mentions the definition, as `@[specifies]` requires;
 - **wanted**: proposed tests still open (`challenge` records nobody has met).
 
-A definition is **pinned** when something in the code, or a reviewer's test that passes, says what it
-means; what is only wanted does not pin it.
+A theorem in the code that is annotated as saying what a definition means, but was written in another
+package than the definition's, comes **from a catalogue**: a package that says things about a
+library's declarations from outside it (merged into its dataset, see ``merge``). It is checked by
+Lean like the library's own, and is shown apart, since the library's authors did not write it.
+
+A definition is **pinned** when something in the code or in a catalogue, or a reviewer's test that
+passes, says what it means; what is only wanted does not pin it.
 """
 from __future__ import annotations
 
@@ -24,7 +29,7 @@ from .dataset import Dataset
 from . import records as rec
 from .views import actions, by_view
 
-CODE, REVIEWERS, WANTED = "code", "reviewers", "wanted"
+CODE, CATALOGUE, REVIEWERS, WANTED = "code", "catalogue", "reviewers", "wanted"
 
 
 class Pins:
@@ -37,15 +42,20 @@ class Pins:
         self.examples = ds.facet("examples")
 
     def of(self, name: str) -> list[dict]:
-        """Each pin of a definition: ``{source, kind, …}``, in the order code, reviewers, wanted."""
+        """Each pin of a definition: ``{source, kind, …}``, in the order code, catalogue, reviewers,
+        wanted."""
         out = []
         for s in self.specs.get(name, []):
-            out.append({"source": CODE, "kind": s["kind"], "decl": s["decl"], "comment": s["comment"]})
+            out.append({"source": self._written(s["decl"], name), "kind": s["kind"], "decl": s["decl"],
+                        "comment": s["comment"]})
         for c in self.chars.get(name, []):
-            out.append({"source": CODE, "kind": "characterization", "decl": c["property"], "comment": c["comment"],
+            out.append({"source": self._written(c["property"], name), "kind": "characterization",
+                        "decl": c["property"], "comment": c["comment"],
                         "existence": c["existence"], "uniqueness": c["uniqueness"],
                         "complete": c["complete"], "open": c["open"], "context": c["context"],
+                        "variables": c["variables"],
                         "assuming": c["assuming"]})
+        out.sort(key=lambda p: p["source"] == CATALOGUE)       # the library's own first
         for row in self.examples.get(name, []):
             for ex in row.get("examples", []):
                 out.append({"source": CODE, "kind": "unit test", "statement": ex["statement"], "path": ex["path"],
@@ -65,14 +75,21 @@ class Pins:
                                 "url": rec.origin_url(c.get("origin")), "id": c["id"], "actions": actions(self.ev, c)})
         return out
 
+    def _written(self, decl: str, name: str) -> str:
+        """Where a theorem about `name` was written: in the code, or in a catalogue when its package is
+        not the definition's."""
+        d, n = self.ds.by_name.get(decl), self.ds.by_name.get(name)
+        return CATALOGUE if d is not None and n is not None and d.package != n.package else CODE
+
     def pinned(self, pins: list[dict]) -> bool:
         """Whether something says what the definition means: anything in the code, or a reviewer's
         test that passes and is about it."""
-        return any(p["source"] == CODE and p.get("result", "passes") == "passes" for p in pins) or \
+        return any(p["source"] in (CODE, CATALOGUE) and p.get("result", "passes") == "passes" for p in pins) or \
             any(p["source"] == REVIEWERS and p["result"] == "passes" and p.get("mentions") is not False for p in pins)
 
     def summary(self, name: str, pins: list[dict] | None = None) -> dict:
         pins = self.of(name) if pins is None else pins
         count = lambda src: sum(1 for p in pins if p["source"] == src)
         return {"pinned": self.pinned(pins), "characterized": is_characterized(self.chars.get(name, [])),
-                "code": count(CODE), "reviewers": count(REVIEWERS), "wanted": count(WANTED)}
+                "code": count(CODE), "catalogue": count(CATALOGUE), "reviewers": count(REVIEWERS),
+                "wanted": count(WANTED)}

@@ -240,6 +240,18 @@ def cmd_validate(args) -> int:
     return 1 if bad else 0
 
 
+def cmd_merge(args) -> int:
+    from .merge import merge
+    try:
+        s = merge(args.dataset, args.add, args.out)
+    except ValueError as e:
+        print(f"merge: {e}", file=sys.stderr)
+        return 1
+    print(f"merged {s['nodes']} declarations ({s['project']} of the catalogue's project), {s['shared']} shared; "
+          f"facet rows {s['facets']} → {args.out}")
+    return 0
+
+
 def cmd_migrate(args) -> int:
     ds = Dataset.load(args.dataset)
     at = _old_datasets(args.at)
@@ -349,6 +361,11 @@ def main(argv: list[str] | None = None) -> int:
     q.add_argument("--author", help="the GitHub login that made the change: new records must be by it")
     q.set_defaults(fn=cmd_store_check)
 
+    q = sub.add_parser("merge", help="add a catalogue's dataset to the dataset of the library it is about")
+    q.add_argument("--dataset", required=True, help="the library's dataset")
+    q.add_argument("--add", required=True, help="the catalogue's dataset")
+    q.add_argument("--out", required=True, help="where to write the merged dataset")
+    q.set_defaults(fn=cmd_merge)
     q = sub.add_parser("migrate", help="convert existing review data to S3")
     q.add_argument("source", choices=["reviewed-by", "referee", "trust"])
     q.add_argument("input", help="Reviewed-by's reviews/ directory, a Referee audit export, or "

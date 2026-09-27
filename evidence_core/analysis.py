@@ -114,7 +114,7 @@ def characterizations(ds: Dataset) -> dict[str, list[dict]]:
             key = (p.get("property"), p.get("target"))
             c = by_prop.setdefault(key, {"property": p.get("property"), "target": p.get("target"),
                                          "comment": "", "existence": [], "uniqueness": [],
-                                         "open": [], "context": [], "assuming": []})
+                                         "open": [], "context": [], "variables": [], "assuming": []})
             if p.get("role") == "property":
                 c["comment"] = p.get("comment", "")
             elif p.get("role") == "existence":
@@ -128,6 +128,7 @@ def characterizations(ds: Dataset) -> dict[str, list[dict]]:
                          existence=shown or ([decl] if p.get("complete") else []),
                          uniqueness=[{"decl": decl, "relation": p.get("relation", "")}],
                          complete=bool(p.get("complete")), context=p.get("context", []),
+                         variables=p.get("variables", []),
                          open=[k.get("text", "") for k in conds if not k.get("proved")],
                          assuming=list(dict.fromkeys(a for k in conds for a in k.get("assuming", []))))
     out: dict[str, list[dict]] = defaultdict(list)
@@ -135,6 +136,18 @@ def characterizations(ds: Dataset) -> dict[str, list[dict]]:
         c.setdefault("complete", bool(c["existence"] and c["uniqueness"]))
         out[target].append(c)
     return dict(out)
+
+
+def domains(ds: Dataset) -> dict[str, dict]:
+    """Each definition's declared domain (`@[domain]`): where it is meant to apply, as
+    ``{statement, note, source}``, ``source`` being ``author`` when declared in the definition's own
+    module and ``catalogue`` when a catalogue declared it for a definition it does not own."""
+    out: dict[str, dict] = {}
+    for decl, payloads in ds.annotations("domain").items():
+        for p in payloads:
+            out[decl] = {"statement": p.get("statement", ""), "note": p.get("note", ""),
+                         "source": p.get("source", "author")}
+    return out
 
 
 def is_characterized(chars: list[dict]) -> bool:
