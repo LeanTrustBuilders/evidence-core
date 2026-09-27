@@ -296,5 +296,48 @@ class KernelCheckTests(unittest.TestCase):
         self.assertIsNone(kernel_summary(self.ds, "term"))
 
 
+class PinsTests(unittest.TestCase):
+    """What pins a definition down, from the code, from reviewers, and wanted."""
+
+    def test_the_three_sources(self):
+        import shutil
+        from evidence_core.pins import Pins
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "ds"
+            shutil.copytree(V / "fixture-b", root)
+            meta = json.loads((root / "meta.json").read_text())
+            meta["facets"].append({"name": "examples", "file": "facets/examples.jsonl", "schema": "examples/1", "count": 1})
+            (root / "meta.json").write_text(json.dumps(meta))
+            (root / "facets" / "examples.jsonl").write_text(json.dumps({"decl": F + "triple", "examples": [
+                {"path": "Fixture/Uses.lean", "line": 3, "end": 3, "statement": "example : triple 1 = 3", "sorry": False}]}) + "\n")
+            ds = Dataset.load(root)
+            alice = person("alice")
+            test_ok = with_id({"schema": rec.SCHEMA, "kind": "test", "subject": rec.subject_from_decl(ds.by_name[F + "double"], ds),
+                               "test": {"name": F + "double_zero"}, "checks": "double 0 = 0", "by": alice,
+                               "at": "2026-09-27T10:00:00Z", "origin": {"kind": "issue", "ref": "o/r#5"}})
+            test_off = with_id({**{k: v for k, v in test_ok.items() if k != "id"}, "test": {"name": F + "triple_pos"},
+                                "checks": "not about double"})
+            challenge = with_id({"schema": rec.SCHEMA, "kind": "challenge", "subject": rec.subject_from_decl(ds.by_name[F + "triple"], ds),
+                                 "property": "triple is injective", "by": alice, "at": "2026-09-27T11:00:00Z",
+                                 "origin": {"kind": "issue", "ref": "o/r#6"}})
+            ev = Evidence.resolve([test_ok, test_off, challenge], ds)
+            pins = Pins(ds, ev)
+            double = pins.of(F + "double")
+            self.assertEqual({(p["source"], p["kind"]) for p in double} >= {("code", "specifies"), ("code", "characterization"), ("reviewers", "test")}, True)
+            tests = {p["decl"]: p for p in double if p["kind"] == "test"}
+            self.assertEqual((tests[F + "double_zero"]["result"], tests[F + "double_zero"]["mentions"]), ("passes", True))
+            self.assertFalse(tests[F + "triple_pos"]["mentions"])        # its statement is not about `double`
+            self.assertEqual(tests[F + "double_zero"]["url"], "https://github.com/o/r/issues/5")
+            triple = pins.of(F + "triple")
+            self.assertIn(("code", "unit test"), {(p["source"], p["kind"]) for p in triple})
+            [wanted] = [p for p in triple if p["source"] == "wanted"]
+            self.assertEqual((wanted["comment"], wanted["actions"]), ("triple is injective", ["met", "failed", "declined", "withdraw"]))
+            self.assertEqual(pins.summary(F + "double")["pinned"], True)
+            self.assertEqual(pins.summary(F + "double")["characterized"], True)
+            # A reviewer's test that is not about the definition does not pin it.
+            self.assertFalse(pins.pinned([{"source": "reviewers", "result": "passes", "mentions": False}]))
+            self.assertFalse(pins.pinned([{"source": "wanted"}]))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -93,6 +93,10 @@ reads) takes what it shows from here, and only chooses how to display it:
 - `ledger`: provenance across builds, when each declaration's meaning last changed;
 - `analysis`: closures split into project and upstream, whether a `sorry` is a declaration's own,
   specifications and characterizations, the scope of a claims-only page, trusted packages;
+- `pins`: what pins a definition down, from three sources: in the code (`@[specifies]`, examples and
+  non-examples, characterizations, the `example`s naming it), from reviewers (listed tests and met
+  proposed tests, each passing or not, and whether its statement mentions the definition, as
+  `@[specifies]` requires) and wanted (proposed tests still open); and whether it is pinned;
 - `checks`: the kernel check's results (facet `check.kernel.<notion>`, written by `trust-extract check`),
   per declaration (`kernel`) and over a claim's closure or a library (`kernel_summary`);
 - `source`: a declaration's text from the `source` facet and a checkout, with or without its doc

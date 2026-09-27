@@ -233,15 +233,17 @@ class Evidence:
     def tests(self, name: str) -> list[dict]:
         """The tests of a declaration, as a page lists them: each `test` record not withdrawn, and
         each challenge met by a declaration it names. Each has ``record``, ``test`` (the name of the
-        testing declaration), ``checks``, ``result`` (``passes``, ``sorry``, ``missing``) and, for a
-        met challenge, ``challenge``."""
+        testing declaration), ``checks``, ``result`` (``passes``, ``sorry``, ``missing``), ``mentions``
+        (whether the test's statement mentions the declaration, which `@[specifies]` requires of a
+        specification too; None when the test is missing) and, for a met challenge, ``challenge``."""
         out = []
         for r, _ in self.records_on(name, "test"):
             if self.state(r["id"]) == "withdrawn":
                 continue
             key = r.get("test") or {}
             result, now = self.test_result(key.get("name", ""), key)
-            out.append({"record": r, "test": now, "checks": r.get("checks", ""), "result": result})
+            out.append({"record": r, "test": now, "checks": r.get("checks", ""), "result": result,
+                        "mentions": self.mentions(now, name)})
         for r, _ in self.records_on(name, "challenge"):
             latest = self.latest_status(r["id"])
             key = (latest or {}).get("test") or {}
@@ -250,8 +252,18 @@ class Evidence:
             if latest and latest.get("state") == "met" and key.get("name"):
                 result, now = self.test_result(key["name"], key)
                 out.append({"record": r, "test": now, "checks": r.get("property", ""),
-                            "result": result, "challenge": r, "met": latest})
+                            "result": result, "mentions": self.mentions(now, name), "challenge": r, "met": latest})
         return out
+
+    def mentions(self, test: str, name: str) -> bool | None:
+        """Whether the statement of ``test`` mentions ``name`` (a `statement` edge), as `@[specifies]`
+        checks of a specification; None when either is not in the dataset."""
+        ds = self.dataset
+        t, d = ds.by_name.get(test), ds.by_name.get(name)
+        if t is None or d is None:
+            return None
+        edges = ds.edges("statement") if "statement" in ds.notions() else ds.edges("meaning")
+        return d.id in edges.get(t.id, ())
 
     def challenges(self, name: str) -> list[tuple[dict, str]]:
         """The challenges (proposed tests) about a declaration, each with its state: ``open``,
