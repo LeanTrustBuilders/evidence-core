@@ -150,6 +150,21 @@ def domains(ds: Dataset) -> dict[str, dict]:
     return out
 
 
+def up_to(ds: Dataset) -> dict[str, dict]:
+    """What each definition is declared to be determined up to (`@[up_to]`): ``{statement,
+    relationHead, note, source}``, ``statement`` being the relation applied to two variables
+    (``x =ᵐ[μ] y``). What proves it is a characterization whose uniqueness theorem ends in such a
+    relation; the two are shown side by side rather than compared here."""
+    out: dict[str, dict] = {}
+    for decl, payloads in ds.annotations("up_to").items():
+        for p in payloads:
+            head = p.get("relationHead", "")
+            out[decl] = {"statement": p.get("statement", ""), "note": p.get("note", ""),
+                         "relationHead": "" if head in ("", "[anonymous]") else head,
+                         "source": p.get("source", "author")}
+    return out
+
+
 def is_characterized(chars: list[dict]) -> bool:
     return any(c["complete"] for c in chars)
 

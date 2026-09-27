@@ -37,6 +37,8 @@ def write_catalogue(root: Path, double_meaning: str) -> None:
     facets = {
         "annotation.domain": [{"decl": F + "double", "entries": [{"statement": "n < 100", "note": "small",
                                                                   "source": "catalogue", "predicate": "Fixture.double._domain"}]}],
+        "annotation.up_to": [{"decl": F + "double", "entries": [{"statement": "x % 2 = y % 2", "relationHead": "Eq",
+                                                                 "note": "", "source": "catalogue", "relation": "Fixture.double._upTo"}]}],
         "annotation.characterization": [{"decl": "Catalogue.double_spec", "entries": [
             {"role": "theorem", "property": "Catalogue.double_spec", "target": F + "double", "relation": "m = double n",
              "form": "iff", "conditions": [{"text": "m = n + n", "proved": True, "by": [], "assuming": []}],
@@ -75,6 +77,8 @@ class MergeTests(unittest.TestCase):
             self.assertEqual(analysis.domains(ds)[F + "double"], {"statement": "n < 100", "note": "small", "source": "catalogue"})
             # the fixture's own characterization of `double`, by a predicate, and the catalogue's
             [c] = [c for c in analysis.characterizations(ds)[F + "double"] if c["property"] == "Catalogue.double_spec"]
+            self.assertEqual(analysis.up_to(ds)[F + "double"],
+                             {"statement": "x % 2 = y % 2", "note": "", "relationHead": "Eq", "source": "catalogue"})
             self.assertEqual((c["property"], c["complete"], c["variables"]), ("Catalogue.double_spec", True, ["n : Nat"]))
             self.assertEqual(ds.facet_row("docstring", "Catalogue.double_spec")["doc"], "Twice, by the catalogue.")
             self.assertEqual(ds.facet_row("docstring", F + "double"), base.facet_row("docstring", F + "double"))
