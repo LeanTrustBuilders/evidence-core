@@ -43,6 +43,14 @@ def write_catalogue(root: Path, double_meaning: str) -> None:
             {"role": "theorem", "property": "Catalogue.double_spec", "target": F + "double", "relation": "m = double n",
              "form": "iff", "conditions": [{"text": "m = n + n", "proved": True, "by": [], "assuming": []}],
              "context": [], "variables": ["n : Nat"], "complete": True}]}],
+        "welldefined": [{"decl": F + "double_zero", "obligations": [
+                            {"kind": "domain", "op": F + "double", "source": "catalogue", "place": "conclusion",
+                             "term": "double 0", "goal": "0 < 100", "status": "discharged", "by": "omega"},
+                            {"kind": "domain", "op": F + "double", "source": "catalogue", "place": "conclusion",
+                             "term": "double n", "goal": "n < 100", "status": "open"},
+                            {"kind": "domain", "op": F + "double", "source": "catalogue", "place": "hypothesis",
+                             "name": "h", "index": 1, "term": "double n", "goal": "n < 100", "status": "open"}]},
+                        {"decl": "Elsewhere.not_in_the_library", "obligations": []}],
         "docstring": [{"decl": "Catalogue.double_spec", "doc": "Twice, by the catalogue."},
                       {"decl": F + "double", "doc": "the catalogue's copy of the library's docstring"}],
     }
@@ -52,8 +60,9 @@ def write_catalogue(root: Path, double_meaning: str) -> None:
             "library": {"root": "Catalogue", "package": "Catalogue"},
             "packages": [{"name": "Catalogue", "requires": ["Fixture"], "modules": 1}],
             "edges": [{"name": "meaning", "format": "i32le-pairs", "file": "edges/meaning.bin", "count": 1}],
-            "facets": [{"name": n, "file": f"facets/{n}.jsonl", "schema": "annotation/2" if n.startswith("annotation") else "docstring/1",
-                        "count": len(r)} for n, r in facets.items()],
+            "facets": [{"name": n, "file": f"facets/{n}.jsonl", "schema": "annotation/2" if n.startswith("annotation") else f"{n}/1",
+                        "count": len(r), **({"dischargers": ["omega"]} if n == "welldefined" else {})}
+                       for n, r in facets.items()],
             "counts": {"nodes": 2, "project": 1, "upstream": 1}}
     (root / "meta.json").write_text(json.dumps(meta))
 
@@ -89,6 +98,13 @@ class MergeTests(unittest.TestCase):
             self.assertIn(("catalogue", "Catalogue.double_spec"), by_source)
             self.assertIn(("code", F + "IsDouble"), by_source)
             self.assertEqual(ds.meta["counts"]["nodes"], len(base.decls) + 1)
+            # its analysis of the library's statements is kept, for the declarations the library has
+            wd = analysis.well_definedness(ds)
+            # what is left, each goal once
+            self.assertEqual((wd[F + "double_zero"]["counts"], wd[F + "double_zero"]["left"]),
+                             ({"discharged": 1, "open": 2}, ["n < 100"]))
+            self.assertNotIn("Elsewhere.not_in_the_library", wd)
+            self.assertEqual(analysis.well_definedness_meta(ds)["dischargers"], ["omega"])
 
     def test_a_catalogue_of_another_commit_is_refused(self):
         with tempfile.TemporaryDirectory() as tmp:

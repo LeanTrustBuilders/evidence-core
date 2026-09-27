@@ -11,8 +11,10 @@ What is added:
 
 * the catalogue's declarations the library's dataset lacks, with new ids after the library's, and
   their scope, hashes and edges (remapped by name);
-* the catalogue's facet rows for those declarations, and its annotation rows (`annotation.*`) for the
-  library's declarations too: those are the catalogue's claims about them;
+* the catalogue's facet rows for those declarations, and its annotation rows (`annotation.*`) and
+  well-definedness analysis (`welldefined`) for the library's declarations too: those are the
+  catalogue's claims about them, and what follows from them. A row about a declaration the
+  merged dataset does not have is left out;
 * its modules and packages, and a record of the merge in the metadata (`merged`).
 
 Both datasets must describe the same library: every declaration they share must have the same
@@ -85,15 +87,17 @@ def merge(base_dir: str | Path, add_dir: str | Path, out_dir: str | Path) -> dic
         entry["count"] = entry.get("count", 0) + len(pairs) // 2
         edge_counts[notion] = len(pairs) // 2
 
-    # --- facets: rows of the added nodes, and the catalogue's annotations of the library's ---------
+    # --- facets: rows of the added nodes, and what the catalogue says about the library's ---------
     facet_rows: dict[str, int] = {}
     add_ids = {d.name: d.id for d in add.decls}
+    known = set(base.by_name) | {add.decls[i].name for i in added}
     for entry in add.meta.get("facets", []):
         name = entry["name"]
+        about_library = name.startswith("annotation.") or name == "welldefined"
         rows = []
         for decl, rs in add.facet(name).items():
             i = add_ids.get(decl)
-            if (i is not None and i in new) or name.startswith("annotation."):
+            if (i is not None and i in new) or (about_library and decl in known):
                 rows.extend(rs)
         if not rows:
             continue

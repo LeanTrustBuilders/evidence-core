@@ -166,6 +166,46 @@ def up_to(ds: Dataset) -> dict[str, dict]:
     return out
 
 
+# The statuses of a well-definedness obligation, from the one a reader should see first.
+WELL_DEFINED_STATUSES = ("open", "refuted", "unapplied", "irrelevant", "discharged")
+# Those that leave a use of the definition outside what the statement shows to be its domain.
+WELL_DEFINED_LEFT = ("open", "refuted", "unapplied")
+
+
+def well_definedness(ds: Dataset) -> dict[str, dict]:
+    """What the well-definedness analyzer found in each declaration's statement (facet `welldefined`,
+    written by `trust-extract welldefined`): each use of a definition with a declared domain, and
+    whether its arguments are shown to be in the domain given what is in scope where it sits.
+
+    ``{obligations, counts, left, error}``: the obligations as the facet has them (``op``,
+    ``source``, ``place``, ``term``, ``goal``, ``status``, ``by``, ``hypothesis``, ``bound``),
+    their count per status, and ``left``, the goals not shown (open, refuted or unapplied), each
+    once: what a claim leaves unsaid about the domains of what it uses. A merged dataset can hold
+    two analyses of a declaration; the last one wins."""
+    out: dict[str, dict] = {}
+    for decl, rows in ds.facet("welldefined").items():
+        row = rows[-1]
+        obs = row.get("obligations", [])
+        counts: dict[str, int] = {}
+        left: list[str] = []
+        for o in obs:
+            s = o.get("status", "open")
+            counts[s] = counts.get(s, 0) + 1
+            if s in WELL_DEFINED_LEFT and o.get("goal", o.get("term", "")) not in left:
+                left.append(o.get("goal") or o.get("term", ""))
+        out[decl] = {"obligations": obs, "counts": counts, "left": left, "error": row.get("error")}
+    return out
+
+
+def well_definedness_meta(ds: Dataset) -> dict | None:
+    """How the well-definedness facet was made: the analyzer, its dischargers and their budget, the
+    domains it knew of. The results depend on them. ``None`` when the dataset has no such facet."""
+    entry = next((f for f in ds.meta.get("facets", []) if f["name"] == "welldefined"), None)
+    if entry is None:
+        return None
+    return {k: entry[k] for k in ("analyzer", "dischargers", "heartbeats", "domains", "targets") if k in entry}
+
+
 def is_characterized(chars: list[dict]) -> bool:
     return any(c["complete"] for c in chars)
 
