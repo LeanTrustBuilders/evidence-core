@@ -53,7 +53,7 @@ class Pins:
                         "decl": c["property"], "comment": c["comment"],
                         "existence": c["existence"], "uniqueness": c["uniqueness"],
                         "complete": c["complete"], "open": c["open"], "context": c["context"],
-                        "variables": c["variables"],
+                        "variables": c["variables"], "specialized": c["specialized"],
                         "assuming": c["assuming"]})
         out.sort(key=lambda p: p["source"] == CATALOGUE)       # the library's own first
         for row in self.examples.get(name, []):

@@ -114,7 +114,8 @@ def characterizations(ds: Dataset) -> dict[str, list[dict]]:
             key = (p.get("property"), p.get("target"))
             c = by_prop.setdefault(key, {"property": p.get("property"), "target": p.get("target"),
                                          "comment": "", "existence": [], "uniqueness": [],
-                                         "open": [], "context": [], "variables": [], "assuming": []})
+                                         "open": [], "context": [], "variables": [], "specialized": [],
+                                         "assuming": []})
             if p.get("role") == "property":
                 c["comment"] = p.get("comment", "")
             elif p.get("role") == "existence":
@@ -128,7 +129,7 @@ def characterizations(ds: Dataset) -> dict[str, list[dict]]:
                          existence=shown or ([decl] if p.get("complete") else []),
                          uniqueness=[{"decl": decl, "relation": p.get("relation", "")}],
                          complete=bool(p.get("complete")), context=p.get("context", []),
-                         variables=p.get("variables", []),
+                         variables=p.get("variables", []), specialized=p.get("specialized", []),
                          open=[k.get("text", "") for k in conds if not k.get("proved")],
                          assuming=list(dict.fromkeys(a for k in conds for a in k.get("assuming", []))))
     out: dict[str, list[dict]] = defaultdict(list)
