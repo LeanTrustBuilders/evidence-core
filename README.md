@@ -33,13 +33,13 @@ hashes (meaning, local, content). Against a dataset of the current code, a recor
 | `incomparable` | the record's hashes come from another hasher revision |
 | `unknown` | the record carries no meaning hash |
 
-**Hashes and the graph.** Datasets of `ltb-dataset/1` compute the meaning and local hashes with the
-rule that draws the `meaning` graph (`ltb-meaning/1`), so a record is stale underneath exactly when
-something in its `meaning` closure changed, and the closure members whose local hash changed are the
-ones to blame. Records keyed by the hashes of `ltb-dataset/0` (semantic_hash's) still resolve: given
-a dataset of the record's commit that carries both (every `ltb-dataset/1` dataset keeps the old
-hashes as `legacy`), the record is re-keyed through it and judged like a new one; without one, it is
-compared with the current dataset's legacy hashes.
+**Hashes and the graph.** Datasets compute the meaning and local hashes with the rule that draws the
+`meaning` graph (`ltb-meaning/1`), so a record is stale underneath exactly when something in its
+`meaning` closure changed, and the closure members whose local hash changed are the ones to blame.
+Records keyed by the hashes of `ltb-dataset/0` (semantic_hash's) are incomparable: datasets no longer
+carry those. The content hash (`ltb-content/1` since `ltb-dataset/2`, the same walk with proofs kept)
+decides no status; between two datasets with the same content hasher, it tells a declaration whose
+only change is a proof in its closure (`changes`, "proof only").
 
 **Tests and challenges.** A `test` record names a declaration of the library that tests another; a
 `challenge` is a proposed test, open until it is met (by a declaration that proves it), failed,

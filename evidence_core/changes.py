@@ -10,7 +10,8 @@ statuses, from evidence-core), then refined:
 * **meaning changed underneath** — written the same, but something its statement rests on changed
   (the rewritten dependencies are named);
 * **proof only** — the meaning is the same and only a proof somewhere in its closure changed: no
-  re-reading follows;
+  re-reading follows. Told only when both datasets have the same content hasher (``ltb-content/1``
+  since ``ltb-dataset/2``, semantic_hash's before): otherwise every content hash differs;
 * **renamed** — gone under its old name, present under a new one with the same meaning;
 * **added**, **removed**.
 
@@ -49,6 +50,7 @@ def compare(new: Dataset, old: Dataset, scope_names: set[str] | None = None) -> 
     in_scope = (lambda n: True) if scope_names is None else (lambda n: n in scope_names)
     lists: dict[str, list] = {k: [] for k in ORDER}
     followed: set[str] = set()
+    same_content = new.content_hasher == old.content_hasher
     for d in old.decls:
         if not d.is_project:
             continue
@@ -62,7 +64,7 @@ def compare(new: Dataset, old: Dataset, scope_names: set[str] | None = None) -> 
             continue
         cls, extra = None, {}
         if s.state == "current":
-            if new.by_name[now].content != d.content:
+            if same_content and new.by_name[now].content != d.content:
                 cls = "proof"
         elif s.state == "renamed":
             cls, extra = "renamed", {"was": d.name}
@@ -87,9 +89,8 @@ def compare(new: Dataset, old: Dataset, scope_names: set[str] | None = None) -> 
         "current": {"commit": new.commit, "decls": sum(1 for d in new.decls if d.is_project)},
         "counts": {k: len(v) for k, v in lists.items()},
         "lists": {k: sorted(v) for k, v in lists.items()},
-        # The same hasher, or a baseline of ltb-dataset/0 against a dataset that carries its hashes
-        # as `legacy`, which `classify` then compares with.
-        "comparable": any(all(old.hasher.get(k) == h.get(k) for k in ("name", "revision", "local"))
-                          for h in (new.hasher, new.legacy_hasher)),
+        "comparable": all(old.hasher.get(k) == new.hasher.get(k) for k in ("name", "revision", "local")),
+        # Whether "proof only" could be told: the two datasets' content hashes are comparable.
+        "proofsComparable": same_content,
     }
     return ch

@@ -28,6 +28,7 @@
 {"decl":"Lean.Name.mkStr2","refs":[[26,32,"String"],[36,45,"Lean.Name"]],"text":"Lean.Name.mkStr2 (s₁ s₂ : String) : Lean.Name"}
 {"decl":"Lean.ParserDescr","refs":[],"text":"Lean.ParserDescr : Type"}
 {"decl":"Nat","refs":[],"text":"Nat : Type"}
+{"decl":"Nat.pred","refs":[[11,14,"Nat"],[17,20,"Nat"]],"text":"Nat.pred : Nat → Nat"}
 {"decl":"Not","refs":[],"text":"Not (a : Prop) : Prop"}
 {"decl":"OfNat","refs":[[25,28,"Nat"]],"text":"OfNat.{u} (α : Type u) : Nat → Type u"}
 {"decl":"instAddNat","refs":[[13,16,"Add"],[17,20,"Nat"]],"text":"instAddNat : Add Nat"}

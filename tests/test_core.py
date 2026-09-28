@@ -29,10 +29,6 @@ A = Dataset.load(VECTORS / "fixture-a")
 B = Dataset.load(VECTORS / "fixture-b")
 # Version B extracted as if `Fixture.Uses` did not build: it and the root module are unavailable.
 B_PARTIAL = Dataset.load(VECTORS / "fixture-b-partial")
-# The same fixture (an older version of it) extracted before the rule `ltb-meaning/1`, with
-# semantic_hash's hashes as the meaning hashes (`ltb-dataset/0`).
-V0_A = Dataset.load(VECTORS / "v0" / "fixture-a")
-V0_B = Dataset.load(VECTORS / "v0" / "fixture-b")
 F = "Fixture."
 
 
@@ -57,9 +53,12 @@ class DatasetTests(unittest.TestCase):
         self.assertEqual(B.commit, "B")
         self.assertEqual(set(A.notions()), {"statement", "meaning", "term", "source"})
         self.assertEqual(A.hasher["name"], "ltb-meaning/1")
-        self.assertEqual(A.legacy_hasher["name"], "semantic_hash")
-        self.assertEqual(A.content_hasher["name"], "semantic_hash")
-        self.assertEqual(V0_A.content_hasher["name"], "semantic_hash")
+        self.assertEqual(A.content_hasher, "ltb-content/1")
+        self.assertNotIn("legacy", A.hasher)
+        # A dataset of ltb-dataset/1 had semantic_hash's content hash, at a revision.
+        v1 = Dataset(root=A.root, meta=dict(A.meta, hasher={"name": "ltb-meaning/1", "local": "ltb-local/2",
+                     "content": {"name": "semantic_hash", "revision": "0496f6d"}}), decls=[], by_name={}, by_meaning={})
+        self.assertEqual(v1.content_hasher, "semantic_hash@0496f6d")
 
     def test_closure(self):
         names = {d.name for d in A.closure(F + "triple_pos")}
@@ -74,7 +73,6 @@ class DatasetTests(unittest.TestCase):
 
     def test_facets(self):
         self.assertEqual(A.annotations("claim")[F + "triple_pos"], [{"reference": "Fixture, Theorem 1"}])
-        self.assertEqual(V0_A.annotations("claim")[F + "triple_pos"], [{"reference": "Fixture, Theorem 1"}])
         self.assertEqual(A.facet_row("source", F + "double")["keyword"], "def")
         self.assertIsNone(A.facet_row("source", "Nat"))
 
@@ -141,12 +139,13 @@ class StatusTests(unittest.TestCase):
         self.assertEqual(classify(other, B).state, st.INCOMPARABLE)
         other = dict(subject, hasher={"name": "ltb-meaning/2"})
         self.assertEqual(classify(other, B).state, st.INCOMPARABLE)
-        # A record keyed by semantic_hash, from a revision it does not name: compared with the
-        # dataset's legacy hashes, assuming the revision.
-        legacy = dict(review("triple", V0_A)["subject"], hasher={"name": "semantic_hash", "revision": None})
-        s = classify(legacy, B)
-        self.assertEqual(s.state, st.CURRENT)
-        self.assertTrue(s.assumed_hasher)
+        # A record keyed by semantic_hash's hashes (S1 version 0), which datasets no longer carry.
+        old = dict(subject, hasher={"name": "semantic_hash", "revision": None, "local": "ltb-local-v1"})
+        self.assertEqual(classify(old, B).state, st.INCOMPARABLE)
+        # A record names the content hasher; it takes no part in the status.
+        self.assertEqual(subject["hasher"]["content"], "ltb-content/1")
+        self.assertEqual(classify(dict(subject, hasher=dict(subject["hasher"], content="semantic_hash@x")), B).state,
+                         st.CURRENT)
 
     def test_unavailable(self):
         self.assertEqual(B_PARTIAL.unavailable, {"Fixture", "Fixture.Uses"})
@@ -447,6 +446,16 @@ class CliTests(unittest.TestCase):
         self.assertEqual((c["added"], c["removed"]), (0, 0))
         self.assertTrue(out["comparable"])
 
+    def test_proof_only_needs_the_same_content_hasher(self):
+        from evidence_core.changes import compare
+        other = Dataset(root=A.root, meta=dict(A.meta, hasher=dict(A.hasher, content={"name": "semantic_hash"})),
+                        decls=A.decls, by_name=A.by_name, by_meaning=A.by_meaning)
+        self.assertEqual(compare(B, A).summary["counts"]["proof"], 1)
+        ch = compare(B, other)
+        self.assertEqual(ch.summary["counts"]["proof"], 0)
+        self.assertFalse(ch.summary["proofsComparable"])
+        self.assertTrue(ch.summary["comparable"])
+
     def test_claims_and_ledger(self):
         out = json.loads(self.run_cli("claims", "--dataset", str(VECTORS / "fixture-b"), "--json"))
         self.assertEqual([(c["decl"], c["source"]) for c in out["claims"]], [(F + "triple_pos", "annotation")])
@@ -472,39 +481,6 @@ class CliTests(unittest.TestCase):
                                     "reviewed": 2, "unreviewed": [], "with_problems": [],
                                     "upstream": out[0]["upstream"]}])
             self.assertEqual(self.run_cli("validate", str(path)).strip(), "ok")
-
-
-class LegacyTests(unittest.TestCase):
-    """Records keyed by the hashes of `ltb-dataset/0` (semantic_hash's), against datasets of
-    `ltb-dataset/1`, which carry those hashes as `legacy`."""
-
-    def legacy(self, name):
-        return review(name, V0_A)["subject"]
-
-    def test_the_legacy_hashes_are_the_old_ones(self):
-        for d in V0_A.decls:
-            now = A.by_name.get(d.name)
-            if now is not None and d.is_project:
-                self.assertEqual((now.legacy_meaning, now.legacy_local), (d.meaning, d.local), d.name)
-
-    def test_compared_with_the_legacy_hashes(self):
-        states = {n: classify(self.legacy(n), B).state
-                  for n in ("triple", "double", "double_zero", "triple_two", "triple_three")}
-        self.assertEqual(states, {"triple": st.CURRENT, "double": st.STALE,
-                                  "double_zero": st.STALE_UNDERNEATH, "triple_two": st.CURRENT,
-                                  "triple_three": st.RENAMED})
-
-    def test_rekeyed_through_a_dataset_of_their_commit(self):
-        subject = self.legacy("double_zero")
-        rekeyed = st.translate(subject, A)
-        self.assertEqual(rekeyed["hashes"]["meaning"], A.by_name[F + "double_zero"].meaning)
-        self.assertEqual(rekeyed["hasher"]["name"], "ltb-meaning/1")
-        s = classify(subject, B, old=A)
-        self.assertEqual(s.state, st.STALE_UNDERNEATH)
-        self.assertEqual(s.changed, [F + "double"])
-
-    def test_new_records_against_old_datasets(self):
-        self.assertEqual(classify(review("triple")["subject"], V0_B).state, st.INCOMPARABLE)
 
 
 class ChallengeAndTestTests(unittest.TestCase):

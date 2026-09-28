@@ -1,9 +1,9 @@
 {"toolchain": "leanprover/lean4:v4.35.0-rc2",
- "spec": "ltb-dataset/1",
- "producer": {"version": "0.7.0", "parts": 1, "name": "trust-extract"},
+ "spec": "ltb-dataset/2",
+ "producer": {"version": "0.9.0", "parts": 1, "name": "trust-extract"},
  "packages":
  [{"requires": ["TrustAnnotations", "lean4"], "name": "Fixture", "modules": 2},
-  {"requires": ["lean4"], "name": "TrustAnnotations", "modules": 4},
+  {"requires": ["lean4"], "name": "TrustAnnotations", "modules": 6},
   {"requires": [], "name": "lean4", "modules": 2374}],
  "modules": {"file": "modules.jsonl", "count": 2},
  "library":
@@ -21,22 +21,14 @@
  {"name": "ltb-meaning/1",
   "meaning": "ltb-meaning/1",
   "local": "ltb-local/2",
-  "legacy":
-  {"revision": "0496f6d7b650cb03c9ffc61089ffd400dfd98564",
-   "name": "semantic_hash",
-   "meaning": "proof-irrelevant",
-   "local": "ltb-local-v1"},
-  "content":
-  {"variant": "proof-relevant",
-   "revision": "0496f6d7b650cb03c9ffc61089ffd400dfd98564",
-   "name": "semantic_hash"}},
+  "content": "ltb-content/1"},
  "facets":
  [{"schema": "docstring/1",
    "name": "docstring",
    "file": "facets/docstring.jsonl",
    "description":
    "the declaration's docstring, verbatim (project nodes, and upstream nodes unless the extractor ran with --no-upstream-docs)",
-   "count": 25},
+   "count": 26},
   {"schema": "source/1",
    "name": "source",
    "file": "facets/source.jsonl",
@@ -56,6 +48,12 @@
    "`@[claim]` annotations recorded in the TrustAnnotations extension: for each declaration, the payload of each application, in order",
    "count": 1},
   {"schema": "annotation/2",
+   "name": "annotation.domain",
+   "file": "facets/annotation.domain.jsonl",
+   "description":
+   "`@[domain]` annotations recorded in the TrustAnnotations extension: for each declaration, the payload of each application, in order",
+   "count": 1},
+  {"schema": "annotation/2",
    "name": "annotation.example_of",
    "file": "facets/annotation.example_of.jsonl",
    "description":
@@ -72,7 +70,7 @@
    "file": "facets/signature.jsonl",
    "description":
    "every node's signature as Lean prints it (`name (x : α) … : β`), for hovers; with `refs`, as in the statement facet",
-   "count": 35},
+   "count": 36},
   {"schema": "statement/1",
    "name": "statement",
    "file": "facets/statement.jsonl",
@@ -104,4 +102,4 @@
    "description":
    "what the declaration's source needs that its elaborated term does not mention: the coercion instances it relies on, and for a notation what it expands to",
    "count": 1}],
- "counts": {"upstream": 18, "project": 17, "nodes": 35}}
+ "counts": {"upstream": 19, "project": 17, "nodes": 36}}

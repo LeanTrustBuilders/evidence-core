@@ -136,7 +136,8 @@ def subject_from_decl(decl, dataset, subject_kind: str | None = None) -> dict:
     return {
         "name": decl.name, "module": decl.module, "package": decl.package,
         "commit": dataset.commit, "toolchain": dataset.toolchain,
-        "hasher": {k: dataset.hasher.get(k) for k in ("name", "revision", "local")},
+        "hasher": {**{k: dataset.hasher.get(k) for k in ("name", "revision", "local")},
+                   "content": dataset.content_hasher},
         "hashes": hashes, "kind": subject_kind,
     }
 

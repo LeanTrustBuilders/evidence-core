@@ -21,13 +21,15 @@ V = Path(__file__).parent / "vectors"
 F = "Fixture."
 
 
-def write_catalogue(root: Path, double_meaning: str) -> None:
-    """A dataset of a catalogue about the fixture library."""
+def write_catalogue(root: Path, double_meaning: str, content_hasher: str = "ltb-content/1") -> None:
+    """A dataset of a catalogue about the fixture library, whose content hashes are by
+    `content_hasher`."""
     (root / "edges").mkdir(parents=True)
     (root / "facets").mkdir()
     decls = [
         {"id": 0, "name": "Catalogue.double_spec", "module": "Catalogue.Basic", "package": "Catalogue",
-         "scope": "project", "kind": "theorem", "isProp": True, "hashes": {"meaning": "aaaa", "local": "bbbb"}},
+         "scope": "project", "kind": "theorem", "isProp": True,
+         "hashes": {"meaning": "aaaa", "local": "bbbb", "content": "cccc"}},
         {"id": 1, "name": F + "double", "module": "Fixture.Basic", "package": "Fixture", "scope": "upstream",
          "kind": "definition", "isProp": False, "hashes": {"meaning": double_meaning}},
     ]
@@ -56,7 +58,9 @@ def write_catalogue(root: Path, double_meaning: str) -> None:
     }
     for name, rows in facets.items():
         (root / "facets" / f"{name}.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
-    meta = {"spec": "ltb-dataset/1", "toolchain": "leanprover/lean4:v4.34.0",
+    meta = {"spec": "ltb-dataset/2", "toolchain": "leanprover/lean4:v4.34.0",
+            "hasher": {"name": "ltb-meaning/1", "meaning": "ltb-meaning/1", "local": "ltb-local/2",
+                       "content": content_hasher},
             "library": {"root": "Catalogue", "package": "Catalogue"},
             "packages": [{"name": "Catalogue", "requires": ["Fixture"], "modules": 1}],
             "edges": [{"name": "meaning", "format": "i32le-pairs", "file": "edges/meaning.bin", "count": 1}],
@@ -105,6 +109,18 @@ class MergeTests(unittest.TestCase):
                              ({"discharged": 1, "open": 2}, ["n < 100"]))
             self.assertNotIn("Elsewhere.not_in_the_library", wd)
             self.assertEqual(analysis.well_definedness_meta(ds)["dischargers"], ["omega"])
+
+    def test_content_hashes_are_kept_only_from_the_same_hasher(self):
+        base = Dataset.load(V / "fixture-b")
+        for hasher, kept in (("ltb-content/1", "cccc"), ("ltb-content/2", None)):
+            with tempfile.TemporaryDirectory() as tmp:
+                tmp = Path(tmp)
+                write_catalogue(tmp / "cat", base.by_name[F + "double"].meaning, content_hasher=hasher)
+                merge(V / "fixture-b", tmp / "cat", tmp / "out")
+                ds = Dataset.load(tmp / "out")
+                self.assertEqual(ds.by_name["Catalogue.double_spec"].content, kept, hasher)
+                self.assertEqual(ds.by_name["Catalogue.double_spec"].meaning, "aaaa")
+                self.assertEqual(ds.content_hasher, "ltb-content/1")
 
     def test_a_catalogue_of_another_commit_is_refused(self):
         with tempfile.TemporaryDirectory() as tmp:

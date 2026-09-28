@@ -19,7 +19,9 @@ What is added:
 
 Both datasets must describe the same library: every declaration they share must have the same
 meaning hash, which is checked. A catalogue built against another commit of the library would
-otherwise attach its evidence to declarations that have since changed.
+otherwise attach its evidence to declarations that have since changed. The added nodes keep their
+content hashes only if the two datasets have the same content hasher: the merged dataset's
+`meta.json` names the library's.
 """
 from __future__ import annotations
 
@@ -68,6 +70,8 @@ def merge(base_dir: str | Path, add_dir: str | Path, out_dir: str | Path) -> dic
             next_id += 1
             dst.write(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n")
     new = set(added)
+    if add.content_hasher != base.content_hasher:
+        _drop_content(out / "decls.jsonl", {idmap[i] for i in added})
 
     # --- edges: those leaving the added nodes, remapped --------------------------------------------
     edge_counts: dict[str, int] = {}
@@ -134,6 +138,20 @@ def merge(base_dir: str | Path, add_dir: str | Path, out_dir: str | Path) -> dic
     (out / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     return {"nodes": len(added), "project": project, "edges": edge_counts, "facets": facet_rows,
             "modules": len(extra), "shared": len(idmap) - len(added)}
+
+
+def _drop_content(path: Path, ids: set[int]) -> None:
+    """Removes the content hash of the nodes `ids`, hashed by another content hasher."""
+    lines = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        if row["id"] in ids:
+            row.get("hashes", {}).pop("content", None)
+            line = json.dumps(row, ensure_ascii=False, separators=(",", ":"))
+        lines.append(line)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _swapped(pairs: array) -> bytes:

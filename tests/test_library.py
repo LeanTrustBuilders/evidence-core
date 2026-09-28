@@ -143,13 +143,6 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual([k for k, _ in led["decls"][F + "triple_three'"]], [0])   # carried over
         self.assertNotIn(F + "triple_three", led["decls"])
 
-    def test_a_history_recorded_before_ltb_dataset_1_carries_over(self):
-        # The history as a site built from ltb-dataset/0 datasets left it: the old meaning hashes.
-        led = {"builds": [{"commit": "before", "date": "", "label": "before"}],
-               "decls": {d.name: [[0, d.legacy_meaning]] for d in A.decls if d.is_project and d.legacy_meaning}}
-        self.assertTrue(ledger_mod.record(led, A))
-        self.assertTrue(all(len(h) == 1 and h[0][1] == A.by_name[n].meaning for n, h in led["decls"].items()))
-
 
 class SourceTests(unittest.TestCase):
     def test_split(self):

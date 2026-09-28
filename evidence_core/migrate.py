@@ -149,9 +149,9 @@ def from_referee_audit(audit: dict, dataset: Dataset, reviewer: str = "") -> Rep
     """Converts a Referee audit export. Referee records no commit and no reviewer identity: the
     reviewer's GitHub login is required (``reviewer``), the subject's hashes come from ``dataset``,
     and the verdict's own ``meaning`` hash is kept as the meaning hash when present. Referee stamps
-    verdicts with the dataset's meaning hash: the rule's since ``ltb-dataset/1``, semantic_hash's
-    proof-irrelevant hash before (from a revision it does not record). A hash that is neither the
-    dataset's nor its legacy one is kept as semantic_hash's."""
+    verdicts with the dataset's meaning hash, the rule's since ``ltb-dataset/1``. A verdict whose hash
+    is not the dataset's was made on an earlier build: it keeps its meaning hash, with no local hash,
+    and so reads as stale."""
     rep = Report()
     if not reviewer:
         rep.skipped.append("a Referee audit records no reviewer: give the reviewer's GitHub login")
@@ -166,13 +166,7 @@ def from_referee_audit(audit: dict, dataset: Dataset, reviewer: str = "") -> Rep
             continue
         subject = subject_from_decl(decl, dataset)
         if v.get("meaning") and v["meaning"] != decl.meaning:
-            if decl.legacy_meaning and v["meaning"] == decl.legacy_meaning:
-                # Stamped with the dataset's legacy hash: key the record by the legacy hashes.
-                subject["hashes"] = {"meaning": v["meaning"], "local": decl.legacy_local}
-                subject["hasher"] = {k: dataset.legacy_hasher.get(k) for k in ("name", "revision", "local")}
-            else:
-                subject["hashes"] = {"meaning": v["meaning"]}
-                subject["hasher"] = {"name": "semantic_hash", "revision": None, "local": None}
+            subject["hashes"] = {"meaning": v["meaning"]}
         out = {"schema": "ltb-evidence/0", "kind": "review", "subject": subject,
                "verdict": verdict, "rationale": v.get("note", ""),
                "by": {"kind": "person", "involvement": "unknown",

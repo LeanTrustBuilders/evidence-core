@@ -11,9 +11,7 @@ release asset):
 Each declaration lists the builds at which its meaning hash was new: when it first appeared, and
 each change after that. Nothing else is recorded, so a build that changes nothing adds only its
 line to `builds`. A declaration renamed with the same meaning keeps its history (it is found by
-meaning hash). A history recorded before the datasets moved to `ltb-dataset/1` holds the old kind of
-meaning hash, which those datasets still carry (`legacy`): it is carried over, not counted as a
-change.
+meaning hash).
 
 `trust-site ledger --ledger FILE --dataset DIR` records a build; `build --ledger FILE` reads it:
 each declaration's page then says when its meaning last changed, and Changes lets a reader pick
@@ -52,17 +50,13 @@ def record(ledger: dict, ds: Dataset, date: str = "", label: str = "") -> bool:
             continue
         hist = decls.get(d.name)
         if hist is None:
-            old = last_by_meaning.get(d.meaning) or last_by_meaning.get(d.legacy_meaning or "")
+            old = last_by_meaning.get(d.meaning)
             if old and old not in ds.by_name:
                 decls[d.name] = decls.pop(old)
                 if decls[d.name][-1][1] != d.meaning:
                     decls[d.name][-1][1] = d.meaning
                 continue
             decls[d.name] = [[k, d.meaning]]
-        elif hist[-1][1] == d.legacy_meaning:
-            # Recorded before the datasets moved to ltb-dataset/1, and unchanged since by the old
-            # hash: the same meaning, now under the new hash.
-            hist[-1][1] = d.meaning
         elif hist[-1][1] != d.meaning:
             hist.append([k, d.meaning])
     return True
