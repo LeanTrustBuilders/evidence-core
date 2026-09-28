@@ -348,7 +348,8 @@ class PinsTests(unittest.TestCase):
             self.assertFalse(tests[F + "triple_pos"]["mentions"])        # its statement is not about `double`
             self.assertEqual(tests[F + "double_zero"]["url"], "https://github.com/o/r/issues/5")
             triple = pins.of(F + "triple")
-            self.assertIn(("code", "unit test"), {(p["source"], p["kind"]) for p in triple})
+            # An `example` naming it (a facet older datasets carry) is not a pin.
+            self.assertNotIn("unit test", {p["kind"] for p in triple})
             [wanted] = [p for p in triple if p["source"] == "wanted"]
             self.assertEqual((wanted["comment"], wanted["actions"]), ("triple is injective", ["met", "failed", "declined", "withdraw"]))
             self.assertEqual(pins.summary(F + "double")["pinned"], True)

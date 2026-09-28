@@ -4,9 +4,8 @@ A definition is taken on faith unless something says what it means. Three source
 lists them together, each marked by where it comes from:
 
 - **in the code**, written by the library's authors: theorems annotated `@[specifies]`,
-  `@[example_of]`, `@[nonexample_of]` and `@[characterization]` (whose shapes Lean checks), and the
-  `example`s that name the definition (facet `examples`: unit tests, which the compiled library does
-  not keep);
+  `@[example_of]`, `@[nonexample_of]` and `@[characterization]` (whose shapes Lean checks). An
+  `example` that merely names the definition is not one: it need not be about it;
 - **from reviewers**, in an evidence store (S3): declarations of the library listed as its tests
   (`test` records) and proposed tests someone met (`challenge` met by a declaration). Each passes
   while it is in the library at the dataset's commit without `sorry`, and says whether its statement
@@ -39,7 +38,6 @@ class Pins:
         self.ds, self.ev = ds, ev
         self.specs = specifications(ds)
         self.chars = characterizations(ds)
-        self.examples = ds.facet("examples")
 
     def of(self, name: str) -> list[dict]:
         """Each pin of a definition: ``{source, kind, …}``, in the order code, catalogue, reviewers,
@@ -56,10 +54,6 @@ class Pins:
                         "variables": c["variables"], "specialized": c["specialized"],
                         "assuming": c["assuming"]})
         out.sort(key=lambda p: p["source"] == CATALOGUE)       # the library's own first
-        for row in self.examples.get(name, []):
-            for ex in row.get("examples", []):
-                out.append({"source": CODE, "kind": "unit test", "statement": ex["statement"], "path": ex["path"],
-                            "line": [ex["line"], ex["end"]], "result": "sorry" if ex.get("sorry") else "passes"})
         if self.ev is not None:
             for t in self.ev.tests(name):
                 r = t["record"] if "challenge" not in t else t["met"]

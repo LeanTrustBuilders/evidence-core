@@ -76,8 +76,8 @@ a store (issue forms and intake) is [evidence-store](https://github.com/LeanTrus
 - `ledger`: provenance across builds, when each declaration's meaning last changed;
 - `analysis`: closures split into project and upstream, whose `sorry` it is, specifications,
   characterizations, domains and well-definedness, the scope of a claims-only page;
-- `pins`: what pins a definition down: in the code (`@[specifies]`, examples, characterizations, the
-  `example`s naming it), from reviewers (tests and met challenges, passing or not) and wanted (open
+- `pins`: what pins a definition down: in the code (`@[specifies]`, `@[example_of]` and
+  `@[nonexample_of]`, characterizations), from reviewers (tests and met challenges, passing or not) and wanted (open
   challenges);
 - `checks`: the kernel check's results (`check.kernel.<notion>`), per declaration and over a closure;
 - `source`: a declaration's text from the `source` facet and a checkout, and its statement apart from
