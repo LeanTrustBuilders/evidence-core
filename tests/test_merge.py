@@ -60,7 +60,7 @@ def write_catalogue(root: Path, double_meaning: str, content_hasher: str = "ltb-
     for name, rows in facets.items():
         (root / "facets" / f"{name}.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
     meta = {"spec": "ltb-dataset/2", "toolchain": "leanprover/lean4:v4.34.0",
-            "hasher": {"meaning": "ltb-meaning/1", "local": "ltb-local/2", "content": content_hasher},
+            "hasher": {"meaning": "ltb-meaning/1", "local": "ltb-local/3", "content": content_hasher},
             "library": {"root": "Catalogue", "package": "Catalogue"},
             "packages": [{"name": "Catalogue", "requires": ["Fixture"], "modules": 1}],
             "edges": [{"name": "meaning", "format": "i32le-pairs", "file": "edges/meaning.bin", "count": 1}],

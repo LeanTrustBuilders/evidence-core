@@ -52,7 +52,7 @@ class DatasetTests(unittest.TestCase):
         self.assertEqual(A.commit, "A")
         self.assertEqual(B.commit, "B")
         self.assertEqual(set(A.notions()), {"statement", "meaning", "term", "source"})
-        self.assertEqual(A.hasher, {"meaning": "ltb-meaning/1", "local": "ltb-local/2", "content": "ltb-content/1"})
+        self.assertEqual(A.hasher, {"meaning": "ltb-meaning/1", "local": "ltb-local/3", "content": "ltb-content/1"})
         self.assertEqual(A.content_hasher, "ltb-content/1")
 
     def test_closure(self):
@@ -131,10 +131,10 @@ class StatusTests(unittest.TestCase):
         self.assertEqual(classify(dict(subject, name=F + "gone",
                                        hashes={"meaning": "0" * 16}), B).state, st.ORPHANED)
         self.assertEqual(classify(dict(subject, hashes={}), B).state, st.UNKNOWN)
-        self.assertEqual(subject["hasher"], {"meaning": "ltb-meaning/1", "local": "ltb-local/2"})
-        for other in ({"meaning": "ltb-meaning/2", "local": "ltb-local/2"},
-                      {"meaning": "ltb-meaning/1", "local": "ltb-local/3"},
-                      {"name": "ltb-meaning/1", "local": "ltb-local/2"}):   # another shape: another hasher
+        self.assertEqual(subject["hasher"], {"meaning": "ltb-meaning/1", "local": "ltb-local/3"})
+        for other in ({"meaning": "ltb-meaning/2", "local": "ltb-local/3"},
+                      {"meaning": "ltb-meaning/1", "local": "ltb-local/4"},
+                      {"name": "ltb-meaning/1", "local": "ltb-local/3"}):   # another shape: another hasher
             self.assertEqual(classify(dict(subject, hasher=other), B).state, st.INCOMPARABLE, other)
         # A record leaves the content hash out: it takes no part in the status.
         self.assertNotIn("content", subject["hashes"])
