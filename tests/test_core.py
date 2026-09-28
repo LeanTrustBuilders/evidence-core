@@ -400,12 +400,12 @@ class StoreTests(unittest.TestCase):
 class GraphAgainstHashTests(unittest.TestCase):
     """Check 1 on the fixture, and on copies of it with one planted disagreement of each kind."""
 
-    def planted(self, ds_path: Path, tmp: Path, edit) -> Dataset:
+    def planted(self, ds_path: Path, tmp: Path, edit, notion: str = "meaning") -> Dataset:
         import shutil, struct
         out = tmp / ds_path.name
         shutil.copytree(ds_path, out)
         meta = json.loads((out / "meta.json").read_text())
-        e = next(x for x in meta["edges"] if x["name"] == "meaning")
+        e = next(x for x in meta["edges"] if x["name"] == notion)
         data = (out / e["file"]).read_bytes()
         pairs = [struct.unpack_from("<ii", data, 8 * k) for k in range(len(data) // 8)]
         pairs = edit(Dataset.load(ds_path), pairs)
@@ -419,6 +419,21 @@ class GraphAgainstHashTests(unittest.TestCase):
         r = graph_against_hash(A, B)
         self.assertEqual(r.findings, [])
         self.assertGreaterEqual(r.stale_underneath, 2)   # double_zero, double_triple: explained by double
+        # The content hash against the `term` graph: triple_two's proof changed as well
+        c = graph_against_hash(A, B, "content")
+        self.assertEqual((c.findings, c.summary()["graph"]), ([], "term"))
+        self.assertGreater(c.changed, r.changed)
+
+    def test_a_planted_term_edge_is_missed_by_the_content_hash(self):
+        from evidence_core.checks import graph_against_hash
+        with tempfile.TemporaryDirectory() as t:
+            t = Path(t)
+            # An edge from triple (whose content is unchanged) to triple_two (whose proof changed).
+            add = lambda ds, pairs: pairs + [(ds.by_name[F + "triple"].id, ds.by_name[F + "triple_two"].id)]
+            b = self.planted(VECTORS / "fixture-b", t, add, "term")
+            r = graph_against_hash(A, b, "content")
+            [f] = [f for f in r.missed if f.decl == F + "triple"]
+            self.assertEqual((f.path, f.rewritten), ([F + "triple", F + "triple_two"], None))
 
     def test_planted_disagreements_are_found(self):
         from evidence_core.checks import graph_against_hash

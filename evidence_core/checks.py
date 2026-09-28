@@ -5,21 +5,23 @@ declaration against its closure as the dataset records it, and the dataset keeps
 facet. `kernel` and `kernel_summary` read it, for a page to say whether what it shows a declaration
 rests on is all it rests on.
 
-**Graph against hash** (check 1). The meaning hash is deep: it changes when anything a declaration's
-meaning rests on changes. The `meaning` graph says what that is. Over two datasets of consecutive
-commits, the two must agree, for every project declaration D present in both:
+**Graph against hash** (check 1). Each hash follows a graph (S1): the meaning hash the `meaning`
+graph, the content hash the `term` graph. Both are deep: a hash changes when anything in its graph's
+closure changes. Over two datasets of consecutive commits, the two must agree, for every project
+declaration D present in both:
 
 * **unexplained**: D's meaning hash changed but its local hash did not ("stale underneath"), and
   nothing in D's graph closure changed. The graph is missing a dependency, or the hash depends on
-  something the graph does not count;
-* **missed**: something in D's graph closure changed meaning, but D's meaning hash did not. The
-  hash does not depend on something the graph counts, or the graph has an extra dependency. A review
-  of D would read "current" although the graph says what it rests on changed.
+  something the graph does not count. Judged for the meaning hash only: telling that D's own
+  content did not change needs its local hash, and datasets have none for the content hash;
+* **missed**: something in D's graph closure changed, but D's hash did not. The hash does not depend
+  on something the graph counts, or the graph has an extra dependency. For the meaning hash, a
+  review of D would read "current" although the graph says what it rests on changed.
 
-"Changed" is judged by name: a node whose meaning hash differs between the datasets, or that exists
-in only one of them. Closures are taken in both datasets' graphs, since a dependency can be added or
-removed by the change itself. Each finding comes with a path through the graph to the changed node
-it is about, which is where to start looking.
+"Changed" is judged by name: a node whose hash differs between the datasets, or that exists in only
+one of them. Closures are taken in both datasets' graphs, since a dependency can be added or removed
+by the change itself. Each finding comes with a path through the graph to the changed node it is
+about, which is where to start looking.
 """
 from __future__ import annotations
 
@@ -50,11 +52,16 @@ class Finding:
         return out
 
 
+#: The graph each hash follows (S1): the closure over its edges is what the hash covers.
+GRAPH_OF = {"meaning": "meaning", "content": "term"}
+
+
 @dataclass
 class GraphHashReport:
+    hash: str                      # "meaning" or "content"
     compared: int
-    changed: int                   # project declarations whose meaning hash changed
-    stale_underneath: int          # of which with an unchanged local hash
+    changed: int                   # project declarations whose hash changed
+    stale_underneath: int          # for the meaning hash: of which with an unchanged local hash
     findings: list[Finding]
 
     @property
@@ -66,24 +73,26 @@ class GraphHashReport:
         return [f for f in self.findings if f.kind == "missed"]
 
     def summary(self) -> dict:
-        return {"compared": self.compared, "meaningChanged": self.changed,
-                "staleUnderneath": self.stale_underneath,
+        return {"hash": self.hash, "graph": GRAPH_OF[self.hash], "compared": self.compared,
+                "changed": self.changed, "staleUnderneath": self.stale_underneath,
                 "unexplained": len(self.unexplained), "missed": len(self.missed)}
 
 
-def changed_names(a: Dataset, b: Dataset) -> set[str]:
-    """Nodes whose meaning moved between ``a`` and ``b``: present in both with another meaning hash,
-    or present in only one with a meaning hash the other does not have. A renamed declaration keeps
-    its meaning hash, which does not depend on names, and is not a change."""
+def changed_names(a: Dataset, b: Dataset, hash: str = "meaning") -> set[str]:
+    """Nodes whose ``hash`` moved between ``a`` and ``b``: present in both with another hash, or
+    present in only one with a hash the other does not have. A renamed declaration keeps its hashes,
+    which do not depend on names, and is not a change."""
+    key = lambda d: getattr(d, hash)
+    in_a, in_b = {key(d) for d in a.decls}, {key(d) for d in b.decls}
     out = set()
     for d in a.decls:
         e = b.by_name.get(d.name)
         if e is not None:
-            if e.meaning != d.meaning:
+            if key(e) != key(d):
                 out.add(d.name)
-        elif d.meaning not in b.by_meaning:
+        elif key(d) not in in_b:
             out.add(d.name)
-    out.update(d.name for d in b.decls if d.name not in a.by_name and d.meaning not in a.by_meaning)
+    out.update(d.name for d in b.decls if d.name not in a.by_name and key(d) not in in_a)
     return out
 
 
@@ -133,8 +142,12 @@ def _closure_size(ds: Dataset, name: str, notion: str) -> int:
     return len(ds.closure(name, notion, include_self=False)) if name in ds.by_name else 0
 
 
-def graph_against_hash(old: Dataset, new: Dataset, notion: str = "meaning") -> GraphHashReport:
-    changed = changed_names(old, new)
+def graph_against_hash(old: Dataset, new: Dataset, hash: str = "meaning") -> GraphHashReport:
+    """Check 1 for ``hash`` (``meaning`` or ``content``) against the graph it follows."""
+    if hash == "content" and old.content_hasher != new.content_hasher:
+        raise ValueError("the two datasets' content hashes come from different hashers")
+    notion = GRAPH_OF[hash]
+    changed = changed_names(old, new, hash)
     reach_old, reach_new = _reaching(old, changed, notion), _reaching(new, changed, notion)
     findings: list[Finding] = []
     compared = moved = stale_under = 0
@@ -143,10 +156,10 @@ def graph_against_hash(old: Dataset, new: Dataset, notion: str = "meaning") -> G
         if not d.is_project or o is None:
             continue
         compared += 1
-        hash_moved = o.meaning != d.meaning
+        hash_moved = getattr(o, hash) != getattr(d, hash)
         if hash_moved:
             moved += 1
-            if o.local == d.local:
+            if hash == "meaning" and o.local == d.local:
                 stale_under += 1
                 if d.name not in reach_old and d.name not in reach_new:
                     findings.append(Finding(d.name, "unexplained",
@@ -157,10 +170,11 @@ def graph_against_hash(old: Dataset, new: Dataset, notion: str = "meaning") -> G
             path = _path_to(ds, d.name, changed, notion)
             end = path[-1] if path else ""
             e_old, e_new = old.by_name.get(end), new.by_name.get(end)
-            rewritten = (e_old is None or e_new is None or e_old.local != e_new.local) if end else None
+            rewritten = (e_old is None or e_new is None or e_old.local != e_new.local) \
+                if end and hash == "meaning" else None
             findings.append(Finding(d.name, "missed", path=path, graph=graph, rewritten=rewritten))
     findings.sort(key=lambda f: (f.kind, f.decl))
-    return GraphHashReport(compared=compared, changed=moved, stale_underneath=stale_under,
+    return GraphHashReport(hash=hash, compared=compared, changed=moved, stale_underneath=stale_under,
                            findings=findings)
 
 

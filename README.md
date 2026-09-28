@@ -104,14 +104,15 @@ python3 -m evidence_core ledger   --ledger ledger.json --dataset DS [--date D] [
 python3 -m evidence_core validate records.jsonl
 python3 -m evidence_core store-check --repo . --base origin/main [--author LOGIN]
 python3 -m evidence_core merge    --dataset LIB_DS --add CATALOGUE_DS --out MERGED_DS
-python3 -m evidence_core check-graph   --old DS1 --new DS2 [--strict]
+python3 -m evidence_core check-graph   --old DS1 --new DS2 [--hash meaning|content] [--strict]
 python3 -m evidence_core compare-rules --a DS_A --b DS_B
 python3 -m evidence_core migrate  reviewed-by|referee|trust INPUT --dataset DS --out records.jsonl
 ```
 
 `--records` takes a JSONL file or a store's directory. Two commands check the suite itself:
-`check-graph`, over datasets of consecutive commits, lists the declarations whose meaning hash and
-meaning graph disagree about whether something beneath them changed (it must find none);
+`check-graph`, over datasets of consecutive commits, lists the declarations whose hash and the graph
+it follows disagree about whether something beneath them changed: the meaning hash and the `meaning`
+graph, or with `--hash content`, the content hash and the `term` graph (it must find none);
 `compare-rules` compares two datasets of one commit made under two rules. `migrate` converts
 Reviewed-by's ledgers, Referee's audit exports and trust's marks to records; the last two record no
 reviewer, so they need `--reviewer`.
