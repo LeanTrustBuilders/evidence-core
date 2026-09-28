@@ -53,7 +53,7 @@ def write_catalogue(root: Path, double_meaning: str, content_hasher: str = "ltb-
                             {"kind": "domain", "op": F + "double", "source": "catalogue", "place": "hypothesis",
                              "name": "h", "index": 1, "term": "double n", "goal": "n < 100", "status": "open"}]},
                         {"decl": "Elsewhere.not_in_the_library", "obligations": []}],
-        "annotation.claim": [{"decl": F + "triple_pos", "entries": [{"reference": "the catalogue"}]}],
+        "annotation.claim": [{"decl": F + "triple_pos", "entries": [{"reference": "the catalogue\u2028again"}]}],
         "docstring": [{"decl": "Catalogue.double_spec", "doc": "Twice, by the catalogue."},
                       {"decl": F + "double", "doc": "the catalogue's copy of the library's docstring"}],
     }
@@ -118,6 +118,10 @@ class MergeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
             shutil.copytree(V / "fixture-b", tmp / "lib")
+            # A raw Unicode line separator inside a string, as Lean's pretty-printer can write: JSON lines
+            # are split at "\n" only.
+            (tmp / "lib" / "facets" / "annotation.claim.jsonl").write_text(json.dumps(
+                {"decl": F + "triple_pos", "entries": [{"reference": "Fixture,\u2028Theorem 1"}]}, ensure_ascii=False) + "\n")
             (tmp / "lib" / "facets" / "welldefined.jsonl").write_text(
                 json.dumps({"decl": F + "double_zero", "error": "the library's own analysis"}) + "\n")
             meta = json.loads((tmp / "lib" / "meta.json").read_text())
@@ -128,12 +132,12 @@ class MergeTests(unittest.TestCase):
             merge(tmp / "lib", tmp / "cat", tmp / "out")
             ds = Dataset.load(tmp / "out")
             self.assertEqual(ds.facet("annotation.claim")[F + "triple_pos"],
-                             [{"decl": F + "triple_pos", "entries": [{"reference": "Fixture, Theorem 1"},
-                                                                     {"reference": "the catalogue"}]}])
+                             [{"decl": F + "triple_pos", "entries": [{"reference": "Fixture,\u2028Theorem 1"},
+                                                                     {"reference": "the catalogue\u2028again"}]}])
             [wd] = ds.facet("welldefined")[F + "double_zero"]
             self.assertNotIn("error", wd)
             for f in ds.meta["facets"]:
-                names = [json.loads(line)["decl"] for line in (ds.root / f["file"]).read_text().splitlines()]
+                names = [json.loads(line)["decl"] for line in (ds.root / f["file"]).read_text().split("\n") if line]
                 self.assertEqual(len(names), len(set(names)), f["name"])
                 self.assertEqual(len(names), f["count"], f["name"])
                 nodes = [n for n in names if n in ds.by_name]

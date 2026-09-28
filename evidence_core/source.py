@@ -20,7 +20,9 @@ class Sources:
             return None
         if path not in self._files:
             p = self.root / path
-            self._files[path] = p.read_text(encoding="utf-8", errors="replace").splitlines() if p.exists() else None
+            # Lines as Lean counts them: at "\n" only (`splitlines` also splits at form feeds and
+            # Unicode line separators, which would shift every line number after them).
+            self._files[path] = p.read_text(encoding="utf-8", errors="replace").split("\n") if p.exists() else None
         return self._files[path]
 
     def text(self, row: dict, doc_comment: bool = True) -> str | None:

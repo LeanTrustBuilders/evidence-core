@@ -115,7 +115,9 @@ def merge(base_dir: str | Path, add_dir: str | Path, out_dir: str | Path) -> dic
         path = out / mine["file"]
         lines = {}
         if path.exists():
-            for line in path.read_text(encoding="utf-8").splitlines():
+            # JSON lines are separated by "\n" only: `splitlines` would also split inside strings,
+            # at the Unicode line separators Lean's pretty-printer can emit.
+            for line in path.read_text(encoding="utf-8").split("\n"):
                 if line.strip():
                     row = json.loads(line)
                     lines[row["decl"]] = row
@@ -158,7 +160,7 @@ def merge(base_dir: str | Path, add_dir: str | Path, out_dir: str | Path) -> dic
 def _drop_content(path: Path, ids: set[int]) -> None:
     """Removes the content hash of the nodes `ids`, hashed by another content hasher."""
     lines = []
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in path.read_text(encoding="utf-8").split("\n"):
         if not line.strip():
             continue
         row = json.loads(line)
