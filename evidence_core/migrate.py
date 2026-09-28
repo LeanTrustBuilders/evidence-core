@@ -16,7 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .dataset import Dataset
-from .records import parse_agent, subject_from_decl, with_id
+from .records import SCHEMA, parse_agent, subject_from_decl, with_id
 
 
 @dataclass
@@ -26,12 +26,12 @@ class Report:
 
 
 def _subject(name: str, commit: str, datasets: dict[str, Dataset], fallback: Dataset,
-             subject_kind: str | None = None) -> tuple[dict | None, dict]:
+             aspect: str | None = None) -> tuple[dict | None, dict]:
     ds = datasets.get(commit, fallback)
     decl = ds.by_name.get(name)
     if decl is None:
         return None, {}
-    subject = subject_from_decl(decl, ds, subject_kind)
+    subject = subject_from_decl(decl, ds, aspect)
     note = {}
     if commit and ds.commit != commit:
         # The hashes describe the declaration at `ds.commit`, not at the commit of the original
@@ -63,8 +63,8 @@ def from_reviewed_by(records: list[dict], tests: list[dict], named: list[dict],
         if subject is None:
             rep.skipped.append(f"review of {r['decl']}: not in any dataset")
             continue
-        out = {"schema": "ltb-evidence/0", "kind": "review", "subject": subject,
-               "verdict": "accept", "rationale": r.get("evidence", ""),
+        out = {"schema": SCHEMA, "kind": "review", "subject": subject,
+               "verdict": "accept", "text": r.get("evidence", ""),
                "by": _github_by(r.get("by", ""), r.get("kind", "person"), r.get("agent", "")),
                "at": r.get("at", ""),
                "origin": {"kind": "issue", "ref": f"{repo}#{r.get('source', {}).get('issue')}"},
@@ -78,8 +78,8 @@ def from_reviewed_by(records: list[dict], tests: list[dict], named: list[dict],
             continue
         src = t.get("source", {})
         ref = f"{repo}#{src.get('issue')}" + (f" comment {src['comment']}" if "comment" in src else "")
-        out = {"schema": "ltb-evidence/0", "kind": "test", "subject": subject,
-               "test": test_subject or {"name": t["test"]}, "checks": t.get("checks", ""),
+        out = {"schema": SCHEMA, "kind": "test", "subject": subject,
+               "test": test_subject or {"name": t["test"]}, "text": t.get("checks", ""),
                "by": _github_by(t.get("by", ""), t.get("kind", "person"), t.get("agent", "")),
                "at": t.get("at", ""), "origin": {"kind": "comment", "ref": ref},
                "migration": {"from": "tests/v1", **note}}
@@ -99,11 +99,13 @@ def from_reviewed_by(records: list[dict], tests: list[dict], named: list[dict],
         else:
             rep.skipped.append(f"named {n['decl']}: by nobody identifiable")
             continue
-        out = {"schema": "ltb-evidence/0", "kind": "named", "subject": subject,
-               "name": n.get("name", ""), "what": n.get("what", ""), "about": n.get("about", ""),
-               "source": n.get("source", {}), "by": by,
+        out = {"schema": SCHEMA, "kind": "named", "subject": subject,
+               "name": n.get("name", ""), "what": n.get("what", ""), "text": n.get("about", ""), "by": by,
                "at": n.get("at", ""), "origin": {"kind": "migration", "ref": repo},
                "migration": {"from": "named/v1", **note}}
+        source = n.get("source") or {}
+        if source.get("url"):
+            out["reference"] = {"url": source["url"]}
         rep.migrated.append(with_id(out))
     # Problem events (schema problem/v1): "reported" becomes a problem review; "closed" and
     # "reopened" become statuses of it. "updated" edits are not carried over: the review keeps the
@@ -118,15 +120,14 @@ def from_reviewed_by(records: list[dict], tests: list[dict], named: list[dict],
                 rep.skipped.append(f"problem on {p.get('decl')}: not in any dataset")
                 continue
             category = {"wrong": "F1", "misleading": "naming"}.get(p.get("what", ""), "other")
-            rationale = p.get("why", "")
-            if p.get("fix"):
-                rationale += f"\n\nSuggested fix: {p['fix']}"
-            out = {"schema": "ltb-evidence/0", "kind": "review", "subject": subject,
-                   "verdict": "problem", "problem": {"category": category},
-                   "rationale": rationale or "(no rationale recorded)",
+            out = {"schema": SCHEMA, "kind": "review", "subject": subject,
+                   "verdict": "problem", "category": category,
+                   "text": p.get("why", "") or "(no reason recorded)",
                    "by": _github_by(p.get("by", ""), p.get("kind", "person"), p.get("agent", "")),
                    "at": p.get("at", ""), "origin": {"kind": "issue", "ref": f"{repo}#{issue}"},
                    "migration": {"from": "problem/v1", "text_hash": p.get("hash"), **note}}
+            if p.get("fix"):
+                out["fix"] = p["fix"]
             out = with_id(out)
             reports[issue] = out
             rep.migrated.append(out)
@@ -138,7 +139,7 @@ def from_reviewed_by(records: list[dict], tests: list[dict], named: list[dict],
             state = "reopened" if event == "reopened" else \
                 {"fixed": "fixed", "not planned": "invalid", "duplicate": "invalid"}.get(
                     p.get("resolution", ""), "invalid")
-            out = {"schema": "ltb-evidence/0", "kind": "status", "target": target["id"],
+            out = {"schema": SCHEMA, "kind": "status", "target": target["id"],
                    "state": state, "by": _github_by(p.get("by", ""), "person", ""),
                    "at": p.get("at", ""), "origin": {"kind": "issue", "ref": f"{repo}#{issue}"}}
             rep.migrated.append(with_id(out))
@@ -167,8 +168,8 @@ def from_referee_audit(audit: dict, dataset: Dataset, reviewer: str = "") -> Rep
         subject = subject_from_decl(decl, dataset)
         if v.get("meaning") and v["meaning"] != decl.meaning:
             subject["hashes"] = {"meaning": v["meaning"]}
-        out = {"schema": "ltb-evidence/0", "kind": "review", "subject": subject,
-               "verdict": verdict, "rationale": v.get("note", ""),
+        out = {"schema": SCHEMA, "kind": "review", "subject": subject,
+               "verdict": verdict, "text": v.get("note", ""),
                "by": {"kind": "person", "involvement": "unknown",
                       "identity": {"kind": "github", "id": reviewer}},
                "at": v.get("at", ""), "origin": {"kind": "migration",
@@ -192,8 +193,8 @@ def from_trust_marks(marks: dict, datasets: dict[str, Dataset], fallback: Datase
         if subject is None:
             rep.skipped.append(f"trusted {m['name']}: not in any dataset")
             continue
-        out = {"schema": "ltb-evidence/0", "kind": "review", "subject": subject,
-               "verdict": "accept", "rationale": m.get("note", ""),
+        out = {"schema": SCHEMA, "kind": "review", "subject": subject,
+               "verdict": "accept", "text": m.get("note", ""),
                "by": {"kind": "person", "involvement": "unknown",
                       "identity": {"kind": "github", "id": reviewer}},
                "at": m.get("at", "") or "1970-01-01T00:00:00Z",

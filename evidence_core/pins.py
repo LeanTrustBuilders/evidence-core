@@ -64,12 +64,12 @@ class Pins:
             for t in self.ev.tests(name):
                 r = t["record"] if "challenge" not in t else t["met"]
                 out.append({"source": REVIEWERS, "kind": "met challenge" if "challenge" in t else "test", "decl": t["test"],
-                            "comment": t["checks"], "result": t["result"], "mentions": t["mentions"],
+                            "comment": t["text"], "result": t["result"], "mentions": t["mentions"],
                             "by": by_view(r.get("by", {})), "at": r.get("at", ""), "url": rec.origin_url(r.get("origin")),
                             "id": (t.get("challenge") or t["record"])["id"]})
             for c, state in self.ev.challenges(name):
                 if state == "open":
-                    out.append({"source": WANTED, "kind": "challenge", "comment": c.get("property", ""),
+                    out.append({"source": WANTED, "kind": "challenge", "comment": c.get("text", ""),
                                 "statement": c.get("statement", ""), "catches": c.get("catches", ""),
                                 "by": by_view(c.get("by", {})), "at": c.get("at", ""),
                                 "url": rec.origin_url(c.get("origin")), "id": c["id"], "actions": actions(self.ev, c)})

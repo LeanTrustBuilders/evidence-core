@@ -40,7 +40,7 @@ def actions(ev: Evidence, r: dict) -> list[str]:
 
 
 def status_view(x: dict) -> dict:
-    return {"state": x["state"], "at": x.get("at", ""), "by": by_view(x.get("by", {})), "note": x.get("note", ""),
+    return {"state": x["state"], "at": x.get("at", ""), "by": by_view(x.get("by", {})), "text": x.get("text", ""),
             "commit": x.get("commit", ""), "test": x.get("test"), "url": rec.origin_url(x.get("origin")),
             "id": x.get("id", "")}
 
@@ -56,22 +56,20 @@ def record_view(ev: Evidence, r: dict, s: st.Status, decl: str) -> dict:
            "supersedes": (r.get("links") or {}).get("supersedes"),
            "replies": [c["id"] for c in ev.replies.get(r["id"], [])],
            "statuses": [status_view(x) for x in ev.statuses.get(r["id"], [])],
-           "actions": actions(ev, r)}
+           "text": r.get("text", ""), "actions": actions(ev, r)}
     out["inForce"] = out["supersededBy"] is None and out["state"] != "withdrawn"
     kind = r["kind"]
     if kind == "review":
-        out.update(verdict=r["verdict"], category=(r.get("problem") or {}).get("category"),
-                   reference=r.get("reference"), checked=r.get("checked") or {}, caveats=r.get("caveats") or [],
-                   rationale=r.get("rationale", ""), fix=r.get("fix", ""))
+        out.update(verdict=r["verdict"], category=r.get("category"), reference=r.get("reference"),
+                   checked=r.get("checked") or {}, caveats=r.get("caveats") or [], fix=r.get("fix", ""))
     elif kind == "comment":
-        out.update(text=r.get("text", ""), repliesTo=(r.get("links") or {}).get("replies_to"))
+        out.update(repliesTo=(r.get("links") or {}).get("replies_to"))
     elif kind == "test":
-        out.update(test=(r.get("test") or {}).get("name"), checks=r.get("checks", ""))
+        out.update(test=(r.get("test") or {}).get("name"))
     elif kind == "challenge":
-        out.update(property=r.get("property", ""), statement=r.get("statement", ""), catches=r.get("catches", ""),
-                   modes=r.get("modes", []), rationale=r.get("rationale", ""))
+        out.update(statement=r.get("statement", ""), catches=r.get("catches", ""), modes=r.get("modes", []))
     elif kind == "named":
-        out.update(name=r.get("name", ""), what=r.get("what", ""), about=r.get("about", ""), source=r.get("source") or {})
+        out.update(name=r.get("name", ""), what=r.get("what", ""), reference=r.get("reference"))
     return out
 
 

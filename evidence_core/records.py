@@ -1,20 +1,22 @@
-"""S3 evidence records (spec ``ltb-evidence/0``).
+"""S3 evidence records (spec ``ltb-evidence/1``).
 
 Records are JSON objects, stored one per line (JSONL), append-only. Every record has:
 
-* ``schema``: ``"ltb-evidence/0"``;
+* ``schema``: ``"ltb-evidence/1"``;
 * ``kind``: ``review``, ``comment``, ``status``, ``test``, ``challenge`` or ``named`` in this
   version;
 * ``id``: the first 16 hex digits of the SHA-256 of the record's canonical form, which excludes
   ``id`` and ``signature``;
 * ``subject`` (reviews, tests, challenges, named results; optional for comments): the S1 key of the
-  declaration the record is about;
+  declaration the record is about, and its ``aspect``;
+* ``text``: the record's words (a review's reasons, a comment, a status's note, what a test checks,
+  a challenge's property, what a named result is);
 * ``by``: who made it, which is never anonymous: a GitHub account (``identity``), or an AI agent
   (``agent``), or an agent acting through a GitHub account (both); ``at``: when (RFC 3339, UTC);
   ``origin``: where it came from.
 
 The canonical form is the JSON encoding with sorted keys, no whitespace, and non-ASCII characters
-written as themselves (as trust's canonical claims are).
+written as themselves: RFC 8785 for records, whose keys are ASCII and numbers integers.
 """
 from __future__ import annotations
 
@@ -24,10 +26,10 @@ import re
 from pathlib import Path
 from typing import Iterable
 
-SCHEMA = "ltb-evidence/0"
+SCHEMA = "ltb-evidence/1"
 KINDS = ("review", "comment", "status", "test", "challenge", "named")
 VERDICTS = ("accept", "problem", "question")
-SUBJECT_KINDS = ("definition", "statement", "instance", "link", "text")
+ASPECTS = ("definition", "statement", "instance")
 PROBLEM_CATEGORIES = ("F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "naming", "other")
 CHECK_STATES = ("checked", "unchecked", "na")
 STATES = ("fixed", "intended", "invalid", "answered", "met", "failed", "declined", "reopened", "withdrawn")
@@ -126,20 +128,43 @@ def with_id(record: dict) -> dict:
     return out
 
 
-def subject_from_decl(decl, dataset, subject_kind: str | None = None) -> dict:
-    """The S1 key of a dataset node, as a record's ``subject``."""
-    if subject_kind is None:
-        subject_kind = {"instance": "instance"}.get(decl.kind,
-                                                   "statement" if decl.is_prop else "definition")
-    hashes = {k: v for k, v in (("meaning", decl.meaning), ("local", decl.local),
-                                ("content", decl.content)) if v}
+def aspect_of(decl) -> str:
+    """What of a declaration a record is about by default: ``instance`` for an instance,
+    ``statement`` for a proof, ``definition`` otherwise (S3)."""
+    return "instance" if decl.kind == "instance" else ("statement" if decl.is_prop else "definition")
+
+
+def subject_from_decl(decl, dataset, aspect: str | None = None) -> dict:
+    """The S1 key of a dataset node, as a record's ``subject``: without the content hash, which
+    decides nothing about a record (S1)."""
     return {
         "name": decl.name, "module": decl.module, "package": decl.package,
         "commit": dataset.commit, "toolchain": dataset.toolchain,
-        "hasher": {**{k: dataset.hasher.get(k) for k in ("name", "revision", "local")},
-                   "content": dataset.content_hasher},
-        "hashes": hashes, "kind": subject_kind,
+        "hasher": {"meaning": dataset.hasher.get("meaning"), "local": dataset.hasher.get("local")},
+        "hashes": {k: v for k, v in (("meaning", decl.meaning), ("local", decl.local)) if v},
+        "aspect": aspect or aspect_of(decl),
     }
+
+
+def read(record: dict) -> dict:
+    """A record as this reader reads it: a failure mode it does not know is ``other`` (S3,
+    "Compatibility")."""
+    if record.get("kind") == "review" and record.get("category") and \
+            record["category"] not in PROBLEM_CATEGORIES:
+        return {**record, "category": "other"}
+    return record
+
+
+def readable(record: dict) -> bool:
+    """Whether a reader of this version can use a record: of a version it reads, of a kind it
+    knows, and with a verdict or state it knows (S3, "Compatibility")."""
+    if record.get("schema") != SCHEMA or record.get("kind") not in KINDS:
+        return False
+    if record.get("kind") == "review" and record.get("verdict") not in VERDICTS:
+        return False
+    if record.get("kind") == "status" and record.get("state") not in STATES:
+        return False
+    return True
 
 
 def validate(record: dict) -> list[str]:
@@ -160,42 +185,26 @@ def validate(record: dict) -> list[str]:
     if "id" in record and record["id"] != record_id(record):
         errs.append("id does not match the canonical form")
     need("at")
-    if need("by"):
-        by = record["by"]
-        if by.get("kind") not in REVIEWER_KINDS:
-            errs.append(f"by.kind must be one of {REVIEWER_KINDS}")
-        ident = by.get("identity")
-        if ident is not None:
-            if ident.get("kind") not in IDENTITY_KINDS:
-                errs.append(f"by.identity.kind must be one of {IDENTITY_KINDS}")
-            elif not ident.get("id"):
-                errs.append("by.identity.id is required")
-        if by.get("kind") == "person" and ident is None:
-            errs.append("a person is identified by a GitHub account (by.identity)")
-        if by.get("kind") == "agent":
-            agent = by.get("agent")
-            if not isinstance(agent, dict) or not agent.get("tool"):
-                errs.append("by.agent is required for an agent, as {tool, model, session}")
-        if by.get("involvement", "unknown") not in INVOLVEMENT:
-            errs.append(f"by.involvement must be one of {INVOLVEMENT}")
+    errs += _by_errors(record)
+    agent = (record.get("by") or {}).get("kind") == "agent"
     if kind in ("review", "test", "challenge", "named"):
         if need("subject"):
             s = record["subject"]
             for k in ("name", "commit"):
                 need(k, s, "subject.")
-            if s.get("kind", "definition") not in SUBJECT_KINDS:
-                errs.append(f"subject.kind must be one of {SUBJECT_KINDS}")
+            if s.get("aspect", "definition") not in ASPECTS:
+                errs.append(f"subject.aspect must be one of {ASPECTS}")
     if kind == "review":
         verdict = record.get("verdict")
         if verdict not in VERDICTS:
             errs.append(f"verdict must be one of {VERDICTS}")
         if verdict == "problem":
-            if record.get("problem", {}).get("category") not in PROBLEM_CATEGORIES:
-                errs.append(f"problem.category must be one of {PROBLEM_CATEGORIES}")
-            if not record.get("rationale"):
-                errs.append("a problem needs a rationale")
-        if record.get("by", {}).get("kind") == "agent" and not record.get("rationale"):
-            errs.append("a review by an agent needs a rationale")
+            if record.get("category") not in PROBLEM_CATEGORIES:
+                errs.append(f"category must be one of {PROBLEM_CATEGORIES}")
+            if not record.get("text"):
+                errs.append("a problem needs its text: why")
+        if agent and not record.get("text"):
+            errs.append("a review by an agent needs its text: why")
         for f, state in (record.get("checked") or {}).items():
             if state not in CHECK_STATES:
                 errs.append(f"checked.{f} must be one of {CHECK_STATES}")
@@ -213,10 +222,10 @@ def validate(record: dict) -> list[str]:
     elif kind == "test":
         if need("test"):
             need("name", record["test"], "test.")
-        if record.get("by", {}).get("kind") == "agent" and not record.get("checks"):
-            errs.append("a test listed by an agent says what it checks")
+        if agent and not record.get("text"):
+            errs.append("a test listed by an agent says what it checks (text)")
     elif kind == "challenge":
-        need("property")
+        need("text")
         for m in record.get("modes") or []:
             if m not in PROBLEM_CATEGORIES:
                 errs.append(f"mode {m!r} is not a failure mode")
@@ -224,6 +233,31 @@ def validate(record: dict) -> list[str]:
         need("name")
         if record.get("what", "result") not in NAMED_WHAT:
             errs.append(f"what must be one of {NAMED_WHAT}")
+    return errs
+
+
+def _by_errors(record: dict) -> list[str]:
+    """Problems with who made a record."""
+    errs: list[str] = []
+    by = record.get("by")
+    if not by:
+        return ["missing by"]
+    if by.get("kind") not in REVIEWER_KINDS:
+        errs.append(f"by.kind must be one of {REVIEWER_KINDS}")
+    ident = by.get("identity")
+    if ident is not None:
+        if ident.get("kind") not in IDENTITY_KINDS:
+            errs.append(f"by.identity.kind must be one of {IDENTITY_KINDS}")
+        elif not ident.get("id"):
+            errs.append("by.identity.id is required")
+    if by.get("kind") == "person" and ident is None:
+        errs.append("a person is identified by a GitHub account (by.identity)")
+    if by.get("kind") == "agent":
+        agent = by.get("agent")
+        if not isinstance(agent, dict) or not agent.get("tool"):
+            errs.append("by.agent is required for an agent, as {tool, model, session}")
+    if by.get("involvement", "unknown") not in INVOLVEMENT:
+        errs.append(f"by.involvement must be one of {INVOLVEMENT}")
     return errs
 
 

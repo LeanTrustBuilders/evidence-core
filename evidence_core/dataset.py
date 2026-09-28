@@ -106,14 +106,9 @@ class Dataset:
 
     @property
     def content_hasher(self) -> str:
-        """The name of the content hasher: ``ltb-content/1`` since ``ltb-dataset/2``; for older
-        datasets, semantic_hash's proof-relevant hash at its revision (``semantic_hash@<revision>``).
-        Two datasets' content hashes are comparable only when these agree."""
-        c = self.hasher.get("content")
-        if isinstance(c, str) and c.startswith("ltb-content/"):
-            return c
-        rev = c.get("revision") if isinstance(c, dict) else self.hasher.get("revision")
-        return f"semantic_hash@{rev or ''}"
+        """The name of the content hasher (``ltb-content/1``). Two datasets' content hashes are
+        comparable only when these agree."""
+        return self.hasher.get("content", "")
 
     def producer(self) -> str:
         p = self.meta.get("producer", {})

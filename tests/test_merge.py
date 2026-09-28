@@ -53,14 +53,14 @@ def write_catalogue(root: Path, double_meaning: str, content_hasher: str = "ltb-
                             {"kind": "domain", "op": F + "double", "source": "catalogue", "place": "hypothesis",
                              "name": "h", "index": 1, "term": "double n", "goal": "n < 100", "status": "open"}]},
                         {"decl": "Elsewhere.not_in_the_library", "obligations": []}],
+        "annotation.claim": [{"decl": F + "triple_pos", "entries": [{"reference": "the catalogue"}]}],
         "docstring": [{"decl": "Catalogue.double_spec", "doc": "Twice, by the catalogue."},
                       {"decl": F + "double", "doc": "the catalogue's copy of the library's docstring"}],
     }
     for name, rows in facets.items():
         (root / "facets" / f"{name}.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
     meta = {"spec": "ltb-dataset/2", "toolchain": "leanprover/lean4:v4.34.0",
-            "hasher": {"name": "ltb-meaning/1", "meaning": "ltb-meaning/1", "local": "ltb-local/2",
-                       "content": content_hasher},
+            "hasher": {"meaning": "ltb-meaning/1", "local": "ltb-local/2", "content": content_hasher},
             "library": {"root": "Catalogue", "package": "Catalogue"},
             "packages": [{"name": "Catalogue", "requires": ["Fixture"], "modules": 1}],
             "edges": [{"name": "meaning", "format": "i32le-pairs", "file": "edges/meaning.bin", "count": 1}],
@@ -109,6 +109,36 @@ class MergeTests(unittest.TestCase):
                              ({"discharged": 1, "open": 2}, ["n < 100"]))
             self.assertNotIn("Elsewhere.not_in_the_library", wd)
             self.assertEqual(analysis.well_definedness_meta(ds)["dischargers"], ["omega"])
+
+    def test_one_line_per_declaration_in_node_order(self):
+        """A catalogue's annotation line joins the library's about the same declaration, its
+        `welldefined` line replaces the library's, and every facet keeps S2's order."""
+        import shutil
+        base = Dataset.load(V / "fixture-b")
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            shutil.copytree(V / "fixture-b", tmp / "lib")
+            (tmp / "lib" / "facets" / "welldefined.jsonl").write_text(
+                json.dumps({"decl": F + "double_zero", "error": "the library's own analysis"}) + "\n")
+            meta = json.loads((tmp / "lib" / "meta.json").read_text())
+            meta["facets"].append({"name": "welldefined", "file": "facets/welldefined.jsonl",
+                                   "schema": "welldefined/1", "count": 1})
+            (tmp / "lib" / "meta.json").write_text(json.dumps(meta))
+            write_catalogue(tmp / "cat", base.by_name[F + "double"].meaning)
+            merge(tmp / "lib", tmp / "cat", tmp / "out")
+            ds = Dataset.load(tmp / "out")
+            self.assertEqual(ds.facet("annotation.claim")[F + "triple_pos"],
+                             [{"decl": F + "triple_pos", "entries": [{"reference": "Fixture, Theorem 1"},
+                                                                     {"reference": "the catalogue"}]}])
+            [wd] = ds.facet("welldefined")[F + "double_zero"]
+            self.assertNotIn("error", wd)
+            for f in ds.meta["facets"]:
+                names = [json.loads(line)["decl"] for line in (ds.root / f["file"]).read_text().splitlines()]
+                self.assertEqual(len(names), len(set(names)), f["name"])
+                self.assertEqual(len(names), f["count"], f["name"])
+                nodes = [n for n in names if n in ds.by_name]
+                self.assertEqual(names, nodes + sorted(n for n in names if n not in ds.by_name), f["name"])
+                self.assertEqual(nodes, sorted(nodes, key=lambda n: ds.by_name[n].id), f["name"])
 
     def test_content_hashes_are_kept_only_from_the_same_hasher(self):
         base = Dataset.load(V / "fixture-b")

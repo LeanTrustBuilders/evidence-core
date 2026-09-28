@@ -36,13 +36,13 @@ def review(name: str, ds: Dataset = A, verdict: str = "accept", agent: bool = Fa
            at: str = "2026-09-25T10:00:00Z", **extra) -> dict:
     by = {"kind": "agent", "agent": {"tool": "test agent"}} if agent else \
         {"kind": "person", "identity": {"kind": "github", "id": "tester"}}
-    r = {"schema": "ltb-evidence/0", "kind": "review",
+    r = {"schema": rec.SCHEMA, "kind": "review",
          "subject": rec.subject_from_decl(ds.by_name[F + name], ds), "verdict": verdict,
          "by": by, "at": at, "origin": {"kind": "cli"}}
     if agent or verdict == "problem":
-        r["rationale"] = "because"
+        r["text"] = "because"
     if verdict == "problem":
-        r["problem"] = {"category": "F1"}
+        r["category"] = "F1"
     r.update(extra)
     return with_id(r)
 
@@ -52,13 +52,8 @@ class DatasetTests(unittest.TestCase):
         self.assertEqual(A.commit, "A")
         self.assertEqual(B.commit, "B")
         self.assertEqual(set(A.notions()), {"statement", "meaning", "term", "source"})
-        self.assertEqual(A.hasher["name"], "ltb-meaning/1")
+        self.assertEqual(A.hasher, {"meaning": "ltb-meaning/1", "local": "ltb-local/2", "content": "ltb-content/1"})
         self.assertEqual(A.content_hasher, "ltb-content/1")
-        self.assertNotIn("legacy", A.hasher)
-        # A dataset of ltb-dataset/1 had semantic_hash's content hash, at a revision.
-        v1 = Dataset(root=A.root, meta=dict(A.meta, hasher={"name": "ltb-meaning/1", "local": "ltb-local/2",
-                     "content": {"name": "semantic_hash", "revision": "0496f6d"}}), decls=[], by_name={}, by_meaning={})
-        self.assertEqual(v1.content_hasher, "semantic_hash@0496f6d")
 
     def test_closure(self):
         names = {d.name for d in A.closure(F + "triple_pos")}
@@ -92,10 +87,10 @@ class RecordTests(unittest.TestCase):
         bad["verdict"] = "maybe"
         self.assertTrue(any("verdict" in e for e in validate(bad)))
         agent = review("triple", agent=True)
-        del agent["rationale"]
-        self.assertTrue(any("agent needs a rationale" in e for e in validate(agent)))
+        del agent["text"]
+        self.assertTrue(any("agent needs its text" in e for e in validate(agent)))
         tampered = review("triple")
-        tampered["rationale"] = "changed after the id was computed"
+        tampered["text"] = "changed after the id was computed"
         self.assertIn("id does not match the canonical form", validate(tampered))
 
     def test_append_and_load(self):
@@ -104,7 +99,7 @@ class RecordTests(unittest.TestCase):
             rec.append(path, [review("triple"), review("double")])
             self.assertEqual(len(rec.load(path)), 2)
             with self.assertRaises(ValueError):
-                rec.append(path, [{"schema": "ltb-evidence/0", "kind": "review"}])
+                rec.append(path, [{"schema": rec.SCHEMA, "kind": "review"}])
 
 
 class StatusTests(unittest.TestCase):
@@ -129,23 +124,20 @@ class StatusTests(unittest.TestCase):
         s = self.status("triple_three")
         self.assertEqual(s.state, st.RENAMED)
         self.assertEqual(s.decl.name, F + "triple_three'")
+        self.assertEqual(review("triple_three")["subject"]["aspect"], "statement")
 
     def test_orphaned_unknown_incomparable(self):
         subject = dict(review("triple")["subject"])
         self.assertEqual(classify(dict(subject, name=F + "gone",
                                        hashes={"meaning": "0" * 16}), B).state, st.ORPHANED)
         self.assertEqual(classify(dict(subject, hashes={}), B).state, st.UNKNOWN)
-        other = dict(subject, hasher={"name": "semantic_hash", "revision": "another"})
-        self.assertEqual(classify(other, B).state, st.INCOMPARABLE)
-        other = dict(subject, hasher={"name": "ltb-meaning/2"})
-        self.assertEqual(classify(other, B).state, st.INCOMPARABLE)
-        # A record keyed by semantic_hash's hashes (S1 version 0), which datasets no longer carry.
-        old = dict(subject, hasher={"name": "semantic_hash", "revision": None, "local": "ltb-local-v1"})
-        self.assertEqual(classify(old, B).state, st.INCOMPARABLE)
-        # A record names the content hasher; it takes no part in the status.
-        self.assertEqual(subject["hasher"]["content"], "ltb-content/1")
-        self.assertEqual(classify(dict(subject, hasher=dict(subject["hasher"], content="semantic_hash@x")), B).state,
-                         st.CURRENT)
+        self.assertEqual(subject["hasher"], {"meaning": "ltb-meaning/1", "local": "ltb-local/2"})
+        for other in ({"meaning": "ltb-meaning/2", "local": "ltb-local/2"},
+                      {"meaning": "ltb-meaning/1", "local": "ltb-local/3"},
+                      {"name": "ltb-meaning/1", "local": "ltb-local/2"}):   # another shape: another hasher
+            self.assertEqual(classify(dict(subject, hasher=other), B).state, st.INCOMPARABLE, other)
+        # A record leaves the content hash out: it takes no part in the status.
+        self.assertNotIn("content", subject["hashes"])
 
     def test_unavailable(self):
         self.assertEqual(B_PARTIAL.unavailable, {"Fixture", "Fixture.Uses"})
@@ -184,7 +176,7 @@ class CoverageTests(unittest.TestCase):
         c = coverage(ev, F + "triple_pos")
         self.assertFalse(c.is_covered)
         self.assertEqual([d.name for d in c.with_problems], [F + "triple"])
-        fixed = with_id({"schema": "ltb-evidence/0", "kind": "status", "target": problem["id"],
+        fixed = with_id({"schema": rec.SCHEMA, "kind": "status", "target": problem["id"],
                          "state": "fixed", "at": "2026-09-25T12:00:00Z",
                          "by": {"kind": "person", "identity": {"kind": "github", "id": "maintainer"}}})
         self.assertEqual(validate(fixed), [])
@@ -263,9 +255,9 @@ class IdentityTests(unittest.TestCase):
                {"kind": "person", "identity": {"kind": "key", "fingerprint": "ab"}},
                {"kind": "agent", "agent": "Claude Code, Opus 5"}, {"kind": "agent"}]
         for by in ok:
-            self.assertEqual(validate(with_id({**base, "by": by, "rationale": "r"})), [], by)
+            self.assertEqual(validate(with_id({**base, "by": by, "text": "r"})), [], by)
         for by in bad:
-            self.assertNotEqual(validate(with_id({**base, "by": by, "rationale": "r"})), [], by)
+            self.assertNotEqual(validate(with_id({**base, "by": by, "text": "r"})), [], by)
 
     def test_agent_labels(self):
         self.assertEqual(rec.parse_agent("Claude Code, Opus 5, session 095781b9"),
@@ -280,16 +272,37 @@ def person(login: str) -> dict:
 
 
 def status(target: dict, state: str, by: dict, at: str) -> dict:
-    return with_id({"schema": "ltb-evidence/0", "kind": "status", "target": target["id"],
+    return with_id({"schema": rec.SCHEMA, "kind": "status", "target": target["id"],
                     "state": state, "by": by, "at": at})
 
 
 def comment(target: dict, text: str, by: dict, at: str) -> dict:
-    return with_id({"schema": "ltb-evidence/0", "kind": "comment", "text": text,
+    return with_id({"schema": rec.SCHEMA, "kind": "comment", "text": text,
                     "links": {"replies_to": target["id"]}, "by": by, "at": at})
 
 
 class ThreadTests(unittest.TestCase):
+    def test_what_a_reader_does_not_know(self):
+        """S3, Compatibility: a failure mode it does not know is `other`; a record of a kind, verdict,
+        state or version it does not know is left out."""
+        prob = review("triple", verdict="problem", category="F42")
+        ev = Evidence.resolve([prob, review("triple", verdict="maybe"),
+                               with_id({**review("double"), "kind": "endorsement"}),
+                               with_id({**review("double"), "schema": "ltb-evidence/0"}),
+                               status(prob, "postponed", person("tester"), "2026-09-26T10:00:00Z")], B)
+        [(r, _)] = ev.records_on(F + "triple")
+        self.assertEqual((r["id"], r["category"]), (prob["id"], "other"))
+        self.assertEqual(ev.records_on(F + "double"), [])
+        self.assertEqual(ev.state(prob["id"]), "open")
+
+    def test_statuses_at_the_same_time_are_ordered_by_id(self):
+        prob = review("triple", verdict="problem")
+        at = "2026-09-26T10:00:00Z"
+        a, b = status(prob, "fixed", person("tester"), at), status(prob, "invalid", person("tester"), at)
+        last = max(a, b, key=lambda r: r["id"])
+        for order in ([prob, a, b], [b, a, prob]):
+            self.assertEqual(Evidence.resolve(order, B).state(prob["id"]), last["state"])
+
     def test_supersedes_only_the_same_reviewer(self):
         first = review("triple")
         again = with_id({**review("triple", at="2026-09-26T10:00:00Z"), "links": {"supersedes": first["id"]},
@@ -305,7 +318,7 @@ class ThreadTests(unittest.TestCase):
 
     def test_withdrawn_answered_and_reopened(self):
         acc = review("triple")
-        q = review("triple", verdict="question", rationale="what is triple 0?")
+        q = review("triple", verdict="question", text="what is triple 0?")
         answer = comment(q, "0, by `rfl`", person("author"), "2026-09-25T11:00:00Z")
         records = [acc, q, answer,
                    status(acc, "withdrawn", person("tester"), "2026-09-25T12:00:00Z"),
@@ -320,7 +333,7 @@ class ThreadTests(unittest.TestCase):
 
     def test_disagreement_and_checklist(self):
         acc = with_id({**review("triple"), "checked": {"F1": "checked", "F4": "unchecked"}})
-        prob = with_id({**review("triple", verdict="problem", problem={"category": "F3"}),
+        prob = with_id({**review("triple", verdict="problem", category="F3"),
                         "by": person("other")})
         ev = Evidence.resolve([acc, prob], B)
         self.assertTrue(ev.disagreement(F + "triple"))
@@ -448,7 +461,7 @@ class CliTests(unittest.TestCase):
 
     def test_proof_only_needs_the_same_content_hasher(self):
         from evidence_core.changes import compare
-        other = Dataset(root=A.root, meta=dict(A.meta, hasher=dict(A.hasher, content={"name": "semantic_hash"})),
+        other = Dataset(root=A.root, meta=dict(A.meta, hasher=dict(A.hasher, content="ltb-content/0")),
                         decls=A.decls, by_name=A.by_name, by_meaning=A.by_meaning)
         self.assertEqual(compare(B, A).summary["counts"]["proof"], 1)
         ch = compare(B, other)
@@ -489,21 +502,21 @@ class ChallengeAndTestTests(unittest.TestCase):
     def rec(self, kind, decl, ds=A, agent=False, **fields):
         by = {"kind": "agent", "identity": {"kind": "github", "id": "op"}, "agent": {"tool": "t"}} if agent else \
             {"kind": "person", "identity": {"kind": "github", "id": "tester"}}
-        return with_id({"schema": "ltb-evidence/0", "kind": kind, "subject": rec.subject_from_decl(ds.by_name[F + decl], ds),
+        return with_id({"schema": rec.SCHEMA, "kind": kind, "subject": rec.subject_from_decl(ds.by_name[F + decl], ds),
                         "by": by, "at": fields.pop("at", "2026-09-26T10:00:00Z"), **fields})
 
     def status(self, target, state, at="2026-09-26T11:00:00Z", **fields):
-        return with_id({"schema": "ltb-evidence/0", "kind": "status", "target": target["id"], "state": state,
+        return with_id({"schema": rec.SCHEMA, "kind": "status", "target": target["id"], "state": state,
                         "by": {"kind": "person", "identity": {"kind": "github", "id": "tester"}}, "at": at, **fields})
 
     def test_validation(self):
-        self.assertEqual(validate(self.rec("challenge", "double", property="double 0 = 0", modes=["F3"])), [])
-        self.assertIn("missing property", validate(self.rec("challenge", "double")))
-        self.assertTrue(any("mode" in e for e in validate(self.rec("challenge", "double", property="p", modes=["F99"]))))
+        self.assertEqual(validate(self.rec("challenge", "double", text="double 0 = 0", modes=["F3"])), [])
+        self.assertIn("missing text", validate(self.rec("challenge", "double")))
+        self.assertTrue(any("mode" in e for e in validate(self.rec("challenge", "double", text="p", modes=["F99"]))))
         self.assertEqual(validate(self.rec("test", "double", test={"name": F + "double_zero"})), [])
         self.assertTrue(any("says what it checks" in e for e in
                             validate(self.rec("test", "double", agent=True, test={"name": F + "double_zero"}))))
-        self.assertEqual(validate(self.status(self.rec("challenge", "double", property="p"), "met",
+        self.assertEqual(validate(self.status(self.rec("challenge", "double", text="p"), "met",
                                               test={"name": F + "double_zero"})), [])
 
     def test_tests_pass_while_they_are_there(self):
@@ -514,7 +527,7 @@ class ChallengeAndTestTests(unittest.TestCase):
         self.assertEqual(got, {F + "double_zero": "passes", F + "no_such_lemma": "missing"})
 
     def test_a_challenge_is_open_until_met_declined_or_failed(self):
-        c = self.rec("challenge", "double", property="double 0 = 0", statement="double 0 = 0")
+        c = self.rec("challenge", "double", text="double 0 = 0", statement="double 0 = 0")
         ev = Evidence.resolve([c], B)
         self.assertEqual(ev.challenges(F + "double"), [(c, "open")])
         self.assertEqual(ev.open_challenges(F + "double"), [c])

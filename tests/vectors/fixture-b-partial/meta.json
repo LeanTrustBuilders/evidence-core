@@ -11,15 +11,13 @@
   "root": "Fixture",
   "repo": "test/fixture",
   "package": "Fixture",
-  "modules": 2,
   "dirty": false,
   "commit": "B"},
  "lean":
  {"version": "4.35.0-rc2",
   "githash": "11acb17ec6b07a8f9e9173e6845197929540936b"},
  "hasher":
- {"name": "ltb-meaning/1",
-  "meaning": "ltb-meaning/1",
+ {"meaning": "ltb-meaning/1",
   "local": "ltb-local/2",
   "content": "ltb-content/1"},
  "facets":

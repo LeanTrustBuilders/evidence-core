@@ -92,8 +92,8 @@ def cmd_compare_rules(args) -> int:
                           "examplesRemoved": c.examples_removed, "examplesAdded": c.examples_added},
                          indent=1))
         return 0
-    print(f"`{args.notion}` graphs of {a.producer()} ({a.hasher.get('name')}) and "
-          f"{b.producer()} ({b.hasher.get('name')})")
+    print(f"`{args.notion}` graphs of {a.producer()} ({a.hasher.get('meaning')}) and "
+          f"{b.producer()} ({b.hasher.get('meaning')})")
     print(f"project declarations: {s['common']} in both, {s['onlyA']} in A only, {s['onlyB']} in B only")
     for n in c.only_b[:args.examples]:
         print(f"  B only: {n}")
@@ -129,7 +129,7 @@ def cmd_status(args) -> int:
         counts[s.state] += 1
         rows.append({"id": r.get("id"), "kind": r.get("kind"), "subject": r["subject"]["name"],
                      "status": s.state, "now": s.decl.name if s.decl else None,
-                     "changed": s.changed, "assumed_hasher": s.assumed_hasher})
+                     "changed": s.changed})
     if args.json:
         print(json.dumps({"counts": counts, "records": rows}, indent=1))
     else:

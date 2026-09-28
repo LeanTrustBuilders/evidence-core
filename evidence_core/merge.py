@@ -13,8 +13,11 @@ What is added:
   their scope, hashes and edges (remapped by name);
 * the catalogue's facet rows for those declarations, and its annotation rows (`annotation.*`) and
   well-definedness analysis (`welldefined`) for the library's declarations too: those are the
-  catalogue's claims about them, and what follows from them. A row about a declaration the
-  merged dataset does not have is left out;
+  catalogue's claims about them, and what follows from them. An annotation row is joined to the
+  library's row about the same declaration (its entries after the library's); a `welldefined` row
+  replaces it, the catalogue's analysis having known the library's domains and its own. A row about
+  a declaration the merged dataset does not have is left out, and every facet keeps S2's order:
+  rows about nodes in node order, then the others by name;
 * its modules and packages, and a record of the merge in the metadata (`merged`).
 
 Both datasets must describe the same library: every declaration they share must have the same
@@ -94,14 +97,14 @@ def merge(base_dir: str | Path, add_dir: str | Path, out_dir: str | Path) -> dic
     # --- facets: rows of the added nodes, and what the catalogue says about the library's ---------
     facet_rows: dict[str, int] = {}
     add_ids = {d.name: d.id for d in add.decls}
-    known = set(base.by_name) | {add.decls[i].name for i in added}
+    order = {d.name: d.id for d in base.decls} | {add.decls[i].name: idmap[i] for i in added}
     for entry in add.meta.get("facets", []):
         name = entry["name"]
         about_library = name.startswith("annotation.") or name == "welldefined"
         rows = []
         for decl, rs in add.facet(name).items():
             i = add_ids.get(decl)
-            if (i is not None and i in new) or (about_library and decl in known):
+            if (i is not None and i in new) or (about_library and decl in order):
                 rows.extend(rs)
         if not rows:
             continue
@@ -109,11 +112,23 @@ def merge(base_dir: str | Path, add_dir: str | Path, out_dir: str | Path) -> dic
         if mine is None:
             mine = dict(entry)
             meta.setdefault("facets", []).append(mine)
-            mine["count"] = 0
-        with (out / mine["file"]).open("a", encoding="utf-8") as f:
-            for r in rows:
-                f.write(json.dumps(r, ensure_ascii=False, separators=(",", ":")) + "\n")
-        mine["count"] = mine.get("count", 0) + len(rows)
+        path = out / mine["file"]
+        lines = {}
+        if path.exists():
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if line.strip():
+                    row = json.loads(line)
+                    lines[row["decl"]] = row
+        for r in rows:
+            had = lines.get(r["decl"])
+            if had is not None and name.startswith("annotation."):
+                r = {**had, "entries": had.get("entries", []) + r.get("entries", [])}
+            lines[r["decl"]] = r
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8") as f:
+            for decl in sorted(lines, key=lambda n: (0, order[n], "") if n in order else (1, 0, n)):
+                f.write(json.dumps(lines[decl], ensure_ascii=False, separators=(",", ":")) + "\n")
+        mine["count"] = len(lines)
         facet_rows[name] = len(rows)
 
     # --- modules and packages ----------------------------------------------------------------------

@@ -37,9 +37,9 @@ def review(name: str, by: dict, verdict: str = "accept", ds: Dataset = B, at: st
     r = {"schema": rec.SCHEMA, "kind": "review", "subject": rec.subject_from_decl(ds.by_name[F + name], ds),
          "verdict": verdict, "by": by, "at": at, "origin": {"kind": "issue", "ref": "o/r#3"}, **extra}
     if by["kind"] == "agent" or verdict != "accept":
-        r.setdefault("rationale", "because")
+        r.setdefault("text", "because")
     if verdict == "problem":
-        r.setdefault("problem", {"category": "F3"})
+        r.setdefault("category", "F3")
     return with_id(r)
 
 
@@ -332,12 +332,12 @@ class PinsTests(unittest.TestCase):
             ds = Dataset.load(root)
             alice = person("alice")
             test_ok = with_id({"schema": rec.SCHEMA, "kind": "test", "subject": rec.subject_from_decl(ds.by_name[F + "double"], ds),
-                               "test": {"name": F + "double_zero"}, "checks": "double 0 = 0", "by": alice,
+                               "test": {"name": F + "double_zero"}, "text": "double 0 = 0", "by": alice,
                                "at": "2026-09-27T10:00:00Z", "origin": {"kind": "issue", "ref": "o/r#5"}})
             test_off = with_id({**{k: v for k, v in test_ok.items() if k != "id"}, "test": {"name": F + "triple_pos"},
-                                "checks": "not about double"})
+                                "text": "not about double"})
             challenge = with_id({"schema": rec.SCHEMA, "kind": "challenge", "subject": rec.subject_from_decl(ds.by_name[F + "triple"], ds),
-                                 "property": "triple is injective", "by": alice, "at": "2026-09-27T11:00:00Z",
+                                 "text": "triple is injective", "by": alice, "at": "2026-09-27T11:00:00Z",
                                  "origin": {"kind": "issue", "ref": "o/r#6"}})
             ev = Evidence.resolve([test_ok, test_off, challenge], ds)
             pins = Pins(ds, ev)

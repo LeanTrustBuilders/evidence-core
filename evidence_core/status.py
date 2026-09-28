@@ -5,14 +5,15 @@ code, it is:
 
 * ``current``: the subject exists under the same name, with the same meaning hash;
 * ``renamed``: no declaration has the name any more, but exactly one has the same meaning hash
-  (and kind): the record follows it;
+  (and aspect): the record follows it;
 * ``stale-underneath``: same name, different meaning hash, same local hash — the declaration is
   written the same, but something it rests on changed;
 * ``stale``: same name, different meaning and local hashes — the declaration itself changed;
 * ``unavailable``: nothing has the name, and the subject's module did not build at the dataset's
   commit (``library.unavailable``): the record cannot be checked against this dataset;
 * ``orphaned``: nothing has the name or the meaning hash any more;
-* ``incomparable``: the record's hashes come from a different hasher than the dataset's;
+* ``incomparable``: the record's hashes come from a different hasher than the dataset's (another
+  ``hasher.meaning`` or ``hasher.local``);
 * ``unknown``: the record has no meaning hash to compare (for example, migrated from a tool that
   did not record one).
 """
@@ -21,6 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .dataset import Dataset, Decl
+from .records import aspect_of
 
 CURRENT = "current"
 RENAMED = "renamed"
@@ -42,30 +44,17 @@ class Status:
     decl: Decl | None = None
     #: For ``stale-underneath`` with an old dataset: the dependencies that were rewritten.
     changed: list[str] = field(default_factory=list)
-    #: Set when the record did not name its hasher revision and it was assumed to match.
-    assumed_hasher: bool = False
 
     @property
     def applies(self) -> bool:
         return self.state in APPLIES
 
 
-def _same_hasher(rec: dict, ds: dict) -> tuple[bool, bool]:
-    """(compatible, assumed) for a record's hasher against one of a dataset's hashers."""
-    if rec.get("name") and ds.get("name") and rec["name"] != ds["name"]:
-        return False, False
-    rev, ds_rev = rec.get("revision"), ds.get("revision")
-    if rev and ds_rev and rev != ds_rev:
-        return False, False
-    if rec.get("local") and ds.get("local") and rec["local"] != ds["local"]:
-        return False, False
-    return True, not rev and bool(ds_rev)
-
-
-def hasher_compatible(subject: dict, dataset: Dataset) -> tuple[bool, bool]:
-    """(compatible, assumed): whether the record's hashes can be compared with the dataset's
-    meaning and local hashes."""
-    return _same_hasher(subject.get("hasher") or {}, dataset.hasher)
+def hasher_compatible(subject: dict, dataset: Dataset) -> bool:
+    """Whether the record's hashes can be compared with the dataset's: the same meaning and local
+    hashers (S1)."""
+    h, ds = subject.get("hasher") or {}, dataset.hasher
+    return all(h.get(k) == ds.get(k) for k in ("meaning", "local"))
 
 
 def classify(subject: dict, dataset: Dataset, old: Dataset | None = None) -> Status:
@@ -74,8 +63,7 @@ def classify(subject: dict, dataset: Dataset, old: Dataset | None = None) -> Sta
     ``old``, when given, is a dataset of the commit the record was made at; it lets a
     ``stale-underneath`` status name the dependencies that were rewritten.
 
-    A record keyed by another hasher (semantic_hash's hashes, from before the rule ``ltb-meaning/1``)
-    is ``incomparable``: datasets no longer carry those hashes.
+    A record keyed by another hasher is ``incomparable``.
     """
     hashes = subject.get("hashes") or {}
     meaning, local = hashes.get("meaning"), hashes.get("local")
@@ -83,43 +71,23 @@ def classify(subject: dict, dataset: Dataset, old: Dataset | None = None) -> Sta
     current = dataset.by_name.get(name)
     if not meaning:
         return Status(UNKNOWN, decl=current)
-    ok, assumed = hasher_compatible(subject, dataset)
-    if not ok:
+    if not hasher_compatible(subject, dataset):
         return Status(INCOMPARABLE, decl=current)
-    return _classify_by(subject, dataset, lambda d: d.meaning, lambda d: d.local,
-                        dataset.by_meaning, old, assumed)
-
-
-def _classify_by(subject: dict, dataset: Dataset, meaning_of, local_of,
-                 by_meaning: dict[str, list[Decl]], old: Dataset | None, assumed: bool) -> Status:
-    hashes = subject.get("hashes") or {}
-    meaning, local = hashes.get("meaning"), hashes.get("local")
-    name = subject.get("name", "")
-    current = dataset.by_name.get(name)
     if current is not None:
-        if meaning_of(current) == meaning:
-            return Status(CURRENT, decl=current, assumed_hasher=assumed)
-        if local and local_of(current) == local:
+        if current.meaning == meaning:
+            return Status(CURRENT, decl=current)
+        if local and current.local == local:
             return Status(STALE_UNDERNEATH, decl=current,
-                          changed=changed_underneath(name, dataset, old) if old else [],
-                          assumed_hasher=assumed)
-        return Status(STALE, decl=current, assumed_hasher=assumed)
+                          changed=changed_underneath(name, dataset, old) if old else [])
+        return Status(STALE, decl=current)
     if subject.get("module") in dataset.unavailable:
-        return Status(UNAVAILABLE, assumed_hasher=assumed)
-    candidates = by_meaning.get(meaning, [])
-    kind = subject.get("kind")
-    if kind:
-        same_kind = [d for d in candidates if subject_kind_of(d) == kind]
-        candidates = same_kind or candidates
+        return Status(UNAVAILABLE)
+    candidates = dataset.by_meaning.get(meaning, [])
+    if len(candidates) > 1:
+        candidates = [d for d in candidates if aspect_of(d) == subject.get("aspect")]
     if len(candidates) == 1:
-        return Status(RENAMED, decl=candidates[0], assumed_hasher=assumed)
-    return Status(ORPHANED, assumed_hasher=assumed)
-
-
-def subject_kind_of(decl: Decl) -> str:
-    if decl.kind == "instance":
-        return "instance"
-    return "statement" if decl.is_prop else "definition"
+        return Status(RENAMED, decl=candidates[0])
+    return Status(ORPHANED)
 
 
 def changed_underneath(name: str, new: Dataset, old: Dataset, notion: str = "meaning") -> list[str]:

@@ -89,7 +89,7 @@ def compare(new: Dataset, old: Dataset, scope_names: set[str] | None = None) -> 
         "current": {"commit": new.commit, "decls": sum(1 for d in new.decls if d.is_project)},
         "counts": {k: len(v) for k, v in lists.items()},
         "lists": {k: sorted(v) for k, v in lists.items()},
-        "comparable": all(old.hasher.get(k) == new.hasher.get(k) for k in ("name", "revision", "local")),
+        "comparable": all(old.hasher.get(k) == new.hasher.get(k) for k in ("meaning", "local")),
         # Whether "proof only" could be told: the two datasets' content hashes are comparable.
         "proofsComparable": same_content,
     }

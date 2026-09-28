@@ -85,10 +85,12 @@ class Evidence:
     def resolve(cls, records: list[dict], dataset: Dataset, old: dict[str, Dataset] | None = None
                 ) -> "Evidence":
         """Resolves records against ``dataset``. ``old`` optionally maps commits to datasets of
-        those commits, so that stale-underneath statuses can name what changed."""
+        those commits, so that stale-underneath statuses can name what changed. Records are read as
+        version 1 (`records.read`), and those a reader of it cannot use are left out."""
         ev = cls(dataset=dataset)
         old = old or {}
-        ordered = sorted(records, key=lambda r: r.get("at", ""))
+        ordered = sorted((rec.read(r) for r in records if rec.readable(r)),
+                         key=lambda r: (r.get("at", ""), r.get("id", "")))
         ev.by_id = {r["id"]: r for r in ordered if r.get("id")}
         decl_of: dict[str, str] = {}
         for r in ordered:
@@ -233,7 +235,7 @@ class Evidence:
     def tests(self, name: str) -> list[dict]:
         """The tests of a declaration, as a page lists them: each `test` record not withdrawn, and
         each challenge met by a declaration it names. Each has ``record``, ``test`` (the name of the
-        testing declaration), ``checks``, ``result`` (``passes``, ``sorry``, ``missing``), ``mentions``
+        testing declaration), ``text`` (what it checks), ``result`` (``passes``, ``sorry``, ``missing``), ``mentions``
         (whether the test's statement mentions the declaration, which `@[specifies]` requires of a
         specification too; None when the test is missing) and, for a met challenge, ``challenge``."""
         out = []
@@ -242,7 +244,7 @@ class Evidence:
                 continue
             key = r.get("test") or {}
             result, now = self.test_result(key.get("name", ""), key)
-            out.append({"record": r, "test": now, "checks": r.get("checks", ""), "result": result,
+            out.append({"record": r, "test": now, "text": r.get("text", ""), "result": result,
                         "mentions": self.mentions(now, name)})
         for r, _ in self.records_on(name, "challenge"):
             latest = self.latest_status(r["id"])
@@ -251,7 +253,7 @@ class Evidence:
                 key = {"name": key}
             if latest and latest.get("state") == "met" and key.get("name"):
                 result, now = self.test_result(key["name"], key)
-                out.append({"record": r, "test": now, "checks": r.get("property", ""),
+                out.append({"record": r, "test": now, "text": r.get("text", ""),
                             "result": result, "mentions": self.mentions(now, name), "challenge": r, "met": latest})
         return out
 
