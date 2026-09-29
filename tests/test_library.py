@@ -266,7 +266,7 @@ class ViewTests(unittest.TestCase):
         self.assertEqual(self.ev.decl_state(F + "double_zero", Policy(agents=True)), "covered")
         self.assertEqual(self.ev.decl_state(F + "triple_one", Policy()), "unreviewed")
         keys = [policy_key(p) for p in all_policies()]
-        self.assertEqual((len(keys), len(set(keys)), policy_key(Policy())), (16, 16, "0011"))
+        self.assertEqual((len(keys), len(set(keys)), policy_key(Policy())), (32, 32, "00111"))
 
     def test_an_acceptance_of_an_earlier_version_is_stale(self):
         ev = Evidence.resolve([review("triple_one", self.alice, ds=A)], B, {A.commit: A})

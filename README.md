@@ -57,8 +57,8 @@ the rubrics known, and an axis of an unknown rubric is kept by its name.
 **Coverage of a claim, under a reader's policy.** A claim is covered when every project declaration in
 its `meaning` closure, the claim included, has an acceptance in force that the policy counts, and none
 has an open problem. The policy says whose reviews count: AI agents or not, authors or not,
-acceptances with caveats or not, acceptances stale underneath or not, and whether upstream
-declarations must be reviewed too. Reviews are data; which ones count is the reader's choice.
+acceptances with caveats or not, acceptances stale underneath or not, reviews from imported stores
+or not, and whether upstream declarations must be reviewed too. Reviews are data; which ones count is the reader's choice.
 
 **The review queue:** unreviewed declarations in the claims' closures, ranked by how many claims rest
 on them, then by how many declarations use them.
@@ -67,6 +67,16 @@ on them, then by how many declarations use them.
 appends records by month; `store-check` checks a change against the revision before it: every new
 record valid and by the account that made the change, nothing changed or removed. The GitHub side of
 a store (issue forms and intake) is [evidence-store](https://github.com/LeanTrustBuilders/evidence-store).
+
+**Imported records** (S3): a store's `store.json` can name other stores (`imports`) whose records its
+views show beside its own. A record is keyed by its subject's name and meaning hash, not by library,
+so a review of a Mathlib definition made in one library's store applies wherever that definition is a
+node. `with_imports` reads a store with its imports, once `evidence-store fetch-imports` has fetched
+them, and `Evidence.resolve(..., sources=...)` applies S3's rules: an imported record whose subject
+is not a node of the dataset is left out with its thread, rather than read as orphaned; a status
+counts only from the record's own store or its maker; imported records have no actions, their state
+being their store's to set. The policy's `imported` switch says whether their reviews count.
+`coverage` and `queue` take `--imports DIR` and `--no-imported`.
 
 **For pages.** A front end takes what it shows from here and only chooses how to display it:
 

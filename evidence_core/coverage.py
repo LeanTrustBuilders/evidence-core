@@ -30,11 +30,13 @@ class Policy:
     authors: bool = True
     #: Require upstream declarations in the closure to be reviewed too.
     upstream: bool = False
+    #: Count reviews from the stores this one imports (S3, "Imported records").
+    imported: bool = True
 
 
 #: The policy's switches that decide whether a review counts (``upstream`` decides instead which
 #: declarations a claim requires), in the order of a policy's key.
-POLICY_SWITCHES = ("agents", "stale_underneath", "caveats", "authors")
+POLICY_SWITCHES = ("agents", "stale_underneath", "caveats", "authors", "imported")
 
 
 def policy_key(policy: Policy) -> str:
@@ -80,51 +82,81 @@ class Evidence:
     superseded_by: dict[str, str] = field(default_factory=dict)
     #: problem record id → latest state ("open", "fixed", "intended", "invalid", "withdrawn")
     problem_state: dict[str, str] = field(default_factory=dict)
+    #: imported record id → the store it comes from (`owner/name`); the store's own records are
+    #: not in it
+    source: dict[str, str] = field(default_factory=dict)
 
     @classmethod
-    def resolve(cls, records: list[dict], dataset: Dataset, old: dict[str, Dataset] | None = None
-                ) -> "Evidence":
+    def resolve(cls, records: list[dict], dataset: Dataset, old: dict[str, Dataset] | None = None,
+                sources: dict[str, str] | None = None) -> "Evidence":
         """Resolves records against ``dataset``. ``old`` optionally maps commits to datasets of
-        those commits, so that stale-underneath statuses can name what changed. Records a reader of
-        this version cannot use are left out (`records.readable`)."""
-        ev = cls(dataset=dataset)
+        those commits, so that stale-underneath statuses can name what changed. ``sources`` maps the
+        ids of imported records to the store each comes from (S3, "Imported records"): an imported
+        record whose subject is not a node here is left out, with the comments and statuses about
+        it, and a status counts for a record only if it is held in the record's store or made by the
+        record's maker. Records a reader of this version cannot use are left out
+        (`records.readable`)."""
+        ev = cls(dataset=dataset, source=dict(sources or {}))
         old = old or {}
         ordered = sorted((r for r in records if rec.readable(r)),
                          key=lambda r: (r.get("at", ""), r.get("id", "")))
         ev.by_id = {r["id"]: r for r in ordered if r.get("id")}
+        irrelevant = (st.INCOMPARABLE, st.ORPHANED, st.UNAVAILABLE)
+        dropped: set[str] = set()
         decl_of: dict[str, str] = {}
+        statuses: list[dict] = []
         for r in ordered:
-            kind = r.get("kind")
+            kind, rid = r.get("kind"), r.get("id", "")
+            imported = rid in ev.source
             if kind == "status":
                 if r.get("target"):
-                    ev.statuses.setdefault(r["target"], []).append(r)
+                    statuses.append(r)
                 continue
             if kind == "comment":
                 target = (r.get("links") or {}).get("replies_to")
-                if target:
-                    ev.replies.setdefault(target, []).append(r)
+                if target in dropped:
+                    dropped.add(rid)
+                    continue
                 name = decl_of.get(target or "")
                 subject = r.get("subject")
                 if name is None and subject:
                     s = st.classify(subject, dataset, old.get(subject.get("commit", "")))
-                    name = s.decl.name if s.decl else None
+                    if s.decl is not None and not (imported and s.state in irrelevant):
+                        name = s.decl.name
+                if name is None and imported:
+                    dropped.add(rid)
+                    continue
+                if target:
+                    ev.replies.setdefault(target, []).append(r)
                 if name is not None:
                     ev.by_decl.setdefault(name, []).append((r, st.Status(st.CURRENT, dataset.by_name.get(name))))
-                    decl_of[r["id"]] = name
+                    decl_of[rid] = name
                 continue
             subject = r.get("subject") or {}
             s = st.classify(subject, dataset, old.get(subject.get("commit", "")))
+            if imported and (s.decl is None or s.state in irrelevant):
+                dropped.add(rid)
+                continue
             if s.decl is not None:
                 ev.by_decl.setdefault(s.decl.name, []).append((r, s))
-                decl_of[r.get("id", "")] = s.decl.name
+                decl_of[rid] = s.decl.name
             else:
                 ev.orphans.append((r, s))
             earlier = (r.get("links") or {}).get("supersedes")
             if kind == "review" and earlier in ev.by_id and \
                     rec.same_reviewer(ev.by_id[earlier].get("by", {}), r.get("by", {})):
                 ev.superseded_by[earlier] = r["id"]
+        for r in statuses:
+            target_id = r["target"]
+            target = ev.by_id.get(target_id)
+            if target_id in dropped or (target is None and r.get("id") in ev.source):
+                continue
+            if target is not None and ev.source.get(r.get("id", ""), "") != ev.source.get(target_id, "") \
+                    and not rec.same_reviewer(r.get("by", {}), target.get("by", {})):
+                continue  # another store cannot set the state of this record
+            ev.statuses.setdefault(target_id, []).append(r)
         for r in ordered:
-            if r.get("kind") == "review" and r.get("verdict") == "problem":
+            if r.get("kind") == "review" and r.get("verdict") == "problem" and r.get("id") not in dropped:
                 ev.problem_state[r["id"]] = ev.state(r["id"])
         return ev
 
@@ -177,6 +209,8 @@ class Evidence:
                 continue
             if r.get("caveats") and not policy.caveats:
                 continue
+            if r.get("id") in self.source and not policy.imported:
+                continue
             out.append(r)
         return out
 
@@ -200,10 +234,13 @@ class Evidence:
 
     def why_uncounted(self, name: str, policy: Policy) -> str:
         """Why the current acceptances of an ``uncounted`` declaration do not count: ``agents`` (all by
-        AI agents, which the policy does not count), ``authors`` (all by its authors), else
+        AI agents, which the policy does not count), ``authors`` (all by its authors), ``imported``
+        (all from imported stores), else
         ``policy``."""
         live = [r for r, s in self.records_on(name, "review")
                 if r.get("verdict") == "accept" and self.in_force(r, s)]
+        if live and not policy.imported and all(r.get("id") in self.source for r in live):
+            return "imported"
         if live and not policy.agents and all(r.get("by", {}).get("kind") == "agent" for r in live):
             return "agents"
         if live and not policy.authors and all(r.get("by", {}).get("involvement") == "author" for r in live):

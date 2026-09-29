@@ -49,6 +49,15 @@ def _records(path: str) -> list[dict]:
     return sto.Store.load(path).records if Path(path).is_dir() else rec.load(path)
 
 
+def _evidence(args, ds: Dataset, old: dict | None = None) -> Evidence:
+    """The records of ``--records`` resolved against ``ds``, with those of the stores it imports
+    when ``--imports`` names where they were fetched (``evidence-store fetch-imports``)."""
+    if getattr(args, "imports", None):
+        imported = sto.with_imports(sto.Store.load(args.records), args.imports)
+        return Evidence.resolve(imported.records, ds, old, sources=imported.sources)
+    return Evidence.resolve(_records(args.records), ds, old)
+
+
 def cmd_store_check(args) -> int:
     store = sto.Store.load(Path(args.repo) / args.store)
     after = store.records
@@ -118,7 +127,7 @@ def cmd_compare_rules(args) -> int:
 def _policy(args) -> Policy:
     return Policy(agents=args.agents, stale_underneath=args.stale_underneath,
                       caveats=not args.no_caveats, authors=not args.no_authors,
-                      upstream=args.upstream)
+                      upstream=args.upstream, imported=not args.no_imported)
 
 
 def cmd_status(args) -> int:
@@ -153,7 +162,7 @@ def _claims(ds: Dataset, explicit: list[str]) -> list[str]:
 
 def cmd_coverage(args) -> int:
     ds = Dataset.load(args.dataset)
-    ev = Evidence.resolve(_records(args.records), ds, _old_datasets(args.at))
+    ev = _evidence(args, ds, _old_datasets(args.at))
     out = [coverage_of(ev, c, _policy(args)).summary() for c in _claims(ds, args.claim)]
     if args.json:
         print(json.dumps(out, indent=1))
@@ -168,7 +177,7 @@ def cmd_coverage(args) -> int:
 
 def cmd_queue(args) -> int:
     ds = Dataset.load(args.dataset)
-    ev = Evidence.resolve(_records(args.records), ds)
+    ev = _evidence(args, ds)
     for d, w in queue_of(ev, _claims(ds, args.claim), _policy(args), limit=args.limit):
         print(f"{w:4} {d.kind:12} {d.name}")
     return 0
@@ -287,6 +296,9 @@ def main(argv: list[str] | None = None) -> int:
         q.add_argument("--no-caveats", action="store_true", help="do not count accepts with caveats")
         q.add_argument("--no-authors", action="store_true", help="do not count authors' reviews")
         q.add_argument("--upstream", action="store_true", help="require upstream reviews too")
+        q.add_argument("--no-imported", action="store_true", help="do not count reviews from imported stores")
+        q.add_argument("--imports", help="where the stores that --records imports were fetched "
+                                         "(evidence-store fetch-imports)")
 
     q = sub.add_parser("status", help="status of every record")
     q.add_argument("--dataset", required=True)

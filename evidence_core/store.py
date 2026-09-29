@@ -5,7 +5,10 @@
   it gives another);
 * records are the lines of every ``*.jsonl`` file under ``evidence/``, and the store is the set of
   them by ``id``;
-* the store is append-only: a record, once written, is never changed or removed.
+* the store is append-only: a record, once written, is never changed or removed;
+* ``imports`` names other stores whose records a view of this one shows beside its own
+  (S3, "Imported records"): ``with_imports`` reads them, once fetched (``evidence-store
+  fetch-imports``).
 
 ``Store.add`` appends records, one file per month (``records/2026-09.jsonl``); ``check`` verifies what
 a change to a store did: every record valid, nothing changed or removed, and each new record's
@@ -14,6 +17,7 @@ identity the one allowed to write it.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -23,6 +27,9 @@ from . import rubric as rb
 
 STORE_SPEC = "ltb-evidence-store/0"
 CONFIG = "store.json"
+#: In a directory of fetched imports: which commit each imported store was read at.
+IMPORTS_MANIFEST = "imports.json"
+REPO = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
 
 class StoreError(ValueError):
@@ -87,6 +94,8 @@ class Store:
             raise StoreError(f"{cfg_path}: spec {config.get('spec')!r}, expected {STORE_SPEC!r}")
         if config.get("rubric") is not None and rb.errors(config["rubric"]):
             raise StoreError(f"{cfg_path}: rubric: {'; '.join(rb.errors(config['rubric']))}")
+        if import_errors(config):
+            raise StoreError(f"{cfg_path}: imports: {'; '.join(import_errors(config))}")
         chunks = [(str(p.relative_to(root)), parse_records(p.read_text(encoding="utf-8"), str(p)))
                   for p in sorted(root.rglob("*.jsonl"))]
         records, conflicts = merge(chunks)
@@ -103,6 +112,11 @@ class Store:
         if not any((root / "records").iterdir()):
             keep.write_text("")
         return cls.load(root)
+
+    @property
+    def imports(self) -> list[dict]:
+        """The stores this one imports, defaults filled in (``import_specs``)."""
+        return import_specs(self.config)
 
     @property
     def rubric(self) -> rb.Rubric:
@@ -142,6 +156,70 @@ class Store:
             self.records.append(r)
             added.append(r)
         return added
+
+
+def import_errors(config: dict) -> list[str]:
+    """What is wrong with a store's ``imports``: a list of ``{repo, path, ref}``, ``repo`` as
+    ``owner/name`` and the other two optional strings."""
+    imports = config.get("imports")
+    if imports is None:
+        return []
+    if not isinstance(imports, list):
+        return ["a list of stores"]
+    out = []
+    for n, i in enumerate(imports):
+        if not isinstance(i, dict) or not isinstance(i.get("repo"), str) or not REPO.match(i["repo"]):
+            out.append(f"#{n}: `repo` must be owner/name")
+        elif set(i) - {"repo", "path", "ref"}:
+            out.append(f"#{n}: unknown fields {sorted(set(i) - {'repo', 'path', 'ref'})}")
+        elif any(k in i and not isinstance(i[k], str) for k in ("path", "ref")):
+            out.append(f"#{n}: `path` and `ref` are strings")
+    return out
+
+
+def import_specs(config: dict) -> list[dict]:
+    """The stores ``config`` imports, each ``{repo, path, ref}``: ``path`` the store's directory in
+    the repository (default ``evidence``), ``ref`` None for the repository's default branch."""
+    return [{"repo": i["repo"], "path": i.get("path") or "evidence", "ref": i.get("ref")}
+            for i in config.get("imports") or []]
+
+
+@dataclass
+class Imported:
+    """A store's records with those of the stores it imports."""
+
+    #: the store's own records, then each imported record it does not hold
+    records: list[dict]
+    #: the id of each imported record → the store it comes from (``owner/name``)
+    sources: dict[str, str]
+    #: each imported store as read: ``{repo, path, ref, commit, records}``, ``records`` the number
+    #: of its records the store did not hold already
+    read: list[dict]
+
+
+def with_imports(store: Store, cache: str | Path) -> Imported:
+    """``store``'s records and those of the stores it imports, fetched into ``cache`` by
+    ``evidence-store fetch-imports``: each at ``<cache>/<owner>/<name>/<path>``, and
+    ``<cache>/imports.json`` saying at which commit each was read. One level: the imported stores'
+    own imports are not read."""
+    cache = Path(cache)
+    manifest = cache / IMPORTS_MANIFEST
+    commits = {(m["repo"], m["path"]): m.get("commit")
+               for m in (json.loads(manifest.read_text(encoding="utf-8")) if manifest.exists() else [])}
+    own = {r["id"] for r in store.records}
+    records, sources, read = list(store.records), {}, []
+    for spec in store.imports:
+        where = cache / spec["repo"] / spec["path"]
+        if not (where / CONFIG).exists():
+            raise StoreError(f"{spec['repo']}: not fetched into {cache} (evidence-store fetch-imports)")
+        n = 0
+        for r in Store.load(where).records:
+            if r["id"] not in own and r["id"] not in sources:
+                sources[r["id"]] = spec["repo"]
+                records.append(r)
+                n += 1
+        read.append({**spec, "commit": commits.get((spec["repo"], spec["path"])), "records": n})
+    return Imported(records=records, sources=sources, read=read)
 
 
 def check(before: list[dict], after: list[dict], author: str | None = None,

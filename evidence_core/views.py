@@ -28,8 +28,8 @@ def actions(ev: Evidence, r: dict) -> list[str]:
     withdrawn or superseded; for a record that stays open (a problem, question or challenge), the
     states that resolve it while it is open, and reopening once it is not; for anything else,
     withdrawing it."""
-    if r["id"] in ev.superseded_by or ev.state(r["id"]) == "withdrawn":
-        return []
+    if r["id"] in ev.superseded_by or ev.state(r["id"]) == "withdrawn" or r["id"] in ev.source:
+        return []  # an imported record's state is its own store's to set
     target = rec.target_kind(r)
     allowed = [s for s, targets in rec.STATE_TARGETS.items() if target in targets]
     if "reopened" not in allowed:
@@ -56,7 +56,7 @@ def record_view(ev: Evidence, r: dict, s: st.Status, decl: str) -> dict:
            "supersedes": (r.get("links") or {}).get("supersedes"),
            "replies": [c["id"] for c in ev.replies.get(r["id"], [])],
            "statuses": [status_view(x) for x in ev.statuses.get(r["id"], [])],
-           "text": r.get("text", ""), "actions": actions(ev, r)}
+           "text": r.get("text", ""), "actions": actions(ev, r), "source": ev.source.get(r["id"])}
     out["inForce"] = out["supersededBy"] is None and out["state"] != "withdrawn"
     kind = r["kind"]
     if kind == "review":
