@@ -4,7 +4,7 @@ A dataset knows one commit; history needs a record kept from build to build. The
 record, one JSON file a deployment carries from one build to the next (committed, or kept as a
 release asset):
 
-    {"format": "trust-site-ledger/1",
+    {"format": "ltb-ledger/1",
      "builds": [{"commit": "…", "date": "2026-09-22", "label": "v4.35.0-rc2-1-g61e506b"}, …],
      "decls": {"Bandits.etcAlgorithm": [[0, "<meaning hash>"], [3, "<meaning hash>"]], …}}
 
@@ -13,9 +13,9 @@ each change after that. Nothing else is recorded, so a build that changes nothin
 line to `builds`. A declaration renamed with the same meaning keeps its history (it is found by
 meaning hash).
 
-`trust-site ledger --ledger FILE --dataset DIR` records a build; `build --ledger FILE` reads it:
-each declaration's page then says when its meaning last changed, and Changes lets a reader pick
-the build they last worked through.
+`evidence-core ledger --ledger FILE --dataset DIR` records a build, and referee-site's
+`build --ledger FILE` reads it: each declaration's page then says when its meaning last changed,
+and Changes lets a reader pick the build they last worked through.
 """
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ from pathlib import Path
 
 from .dataset import Dataset
 
-FORMAT = "trust-site-ledger/1"
+FORMAT = "ltb-ledger/1"
 
 
 def load(path: Path | None) -> dict:
