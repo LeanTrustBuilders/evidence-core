@@ -9,4 +9,4 @@ from .coverage import Evidence, Policy, Coverage, coverage, queue
 from .store import Store, StoreError, Imported, with_imports
 from .rubric import Rubric, Axis, STANDARD as STANDARD_RUBRIC
 
-__version__ = "0.16.0"
+__version__ = "0.16.1"

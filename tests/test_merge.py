@@ -41,6 +41,8 @@ def write_catalogue(root: Path, double_meaning: str, content_hasher: str = "ltb-
                                                                   "source": "catalogue", "predicate": "Fixture.double._domain"}]}],
         "annotation.up_to": [{"decl": F + "double", "entries": [{"statement": "x % 2 = y % 2", "relationHead": "Eq",
                                                                  "note": "", "source": "catalogue", "relation": "Fixture.double._upTo"}]}],
+        # A characterization is also recorded as a specification (TrustAnnotations does both).
+        "annotation.specifies": [{"decl": "Catalogue.double_spec", "entries": [{"target": F + "double", "comment": "twice"}]}],
         "annotation.characterization": [{"decl": "Catalogue.double_spec", "entries": [
             {"role": "theorem", "property": "Catalogue.double_spec", "target": F + "double", "relation": "m = double n",
              "form": "iff", "conditions": [{"text": "m = n + n", "proved": True, "by": [], "assuming": []}],
@@ -98,8 +100,11 @@ class MergeTests(unittest.TestCase):
             self.assertEqual(ds.meta["merged"][0]["library"]["root"], "Catalogue")
             # its theorem pins the definition down, from a catalogue: not written by the library's authors
             from evidence_core.pins import Pins
-            by_source = {(p["source"], p["decl"]) for p in Pins(ds).of(F + "double") if p.get("decl")}
+            pins = Pins(ds).of(F + "double")
+            by_source = {(p["source"], p["decl"]) for p in pins if p.get("decl")}
             self.assertIn(("catalogue", "Catalogue.double_spec"), by_source)
+            # shown once, as the characterization it is
+            self.assertEqual([p["kind"] for p in pins if p.get("decl") == "Catalogue.double_spec"], ["characterization"])
             self.assertIn(("code", F + "IsDouble"), by_source)
             self.assertEqual(ds.meta["counts"]["nodes"], len(base.decls) + 1)
             # its analysis of the library's statements is kept, for the declarations the library has

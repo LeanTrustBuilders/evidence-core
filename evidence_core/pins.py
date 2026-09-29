@@ -43,7 +43,11 @@ class Pins:
         """Each pin of a definition: ``{source, kind, …}``, in the order code, catalogue, reviewers,
         wanted."""
         out = []
+        # A characterization is also recorded as a specification: it is shown once, as what it is.
+        characterizing = {c["property"] for c in self.chars.get(name, [])}
         for s in self.specs.get(name, []):
+            if s["decl"] in characterizing:
+                continue
             out.append({"source": self._written(s["decl"], name), "kind": s["kind"], "decl": s["decl"],
                         "comment": s["comment"]})
         for c in self.chars.get(name, []):
