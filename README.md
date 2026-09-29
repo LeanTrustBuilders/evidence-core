@@ -72,7 +72,8 @@ a store (issue forms and intake) is [evidence-store](https://github.com/LeanTrus
 views show beside its own. A record is keyed by its subject's name and meaning hash, not by library,
 so a review of a Mathlib definition made in one library's store applies wherever that definition is a
 node. `with_imports` reads a store with its imports, once `evidence-store fetch-imports` has fetched
-them, and `Evidence.resolve(..., sources=...)` applies S3's rules: an imported record whose subject
+them, with the store each imported record comes from (`{repo, name}`, the name its `store.json`
+gives), and `Evidence.resolve(..., sources=...)` applies S3's rules: an imported record whose subject
 is not a node of the dataset is left out with its thread, rather than read as orphaned; a status
 counts only from the record's own store or its maker; imported records have no actions, their state
 being their store's to set. The policy's `imported` switch says whether their reviews count.

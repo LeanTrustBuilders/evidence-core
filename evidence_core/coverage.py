@@ -82,16 +82,17 @@ class Evidence:
     superseded_by: dict[str, str] = field(default_factory=dict)
     #: problem record id → latest state ("open", "fixed", "intended", "invalid", "withdrawn")
     problem_state: dict[str, str] = field(default_factory=dict)
-    #: imported record id → the store it comes from (`owner/name`); the store's own records are
+    #: imported record id → the store it comes from, ``{repo, name}``; the store's own records are
     #: not in it
-    source: dict[str, str] = field(default_factory=dict)
+    source: dict[str, dict] = field(default_factory=dict)
 
     @classmethod
     def resolve(cls, records: list[dict], dataset: Dataset, old: dict[str, Dataset] | None = None,
-                sources: dict[str, str] | None = None) -> "Evidence":
+                sources: dict[str, dict] | None = None) -> "Evidence":
         """Resolves records against ``dataset``. ``old`` optionally maps commits to datasets of
         those commits, so that stale-underneath statuses can name what changed. ``sources`` maps the
-        ids of imported records to the store each comes from (S3, "Imported records"): an imported
+        ids of imported records to the store each comes from, ``{repo, name}`` (S3, "Imported
+        records"): an imported
         record whose subject is not a node here is left out, with the comments and statuses about
         it, and a status counts for a record only if it is held in the record's store or made by the
         record's maker. Records a reader of this version cannot use are left out

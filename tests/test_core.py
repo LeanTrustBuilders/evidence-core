@@ -355,7 +355,7 @@ class StoreTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_add_load_and_conflicts(self):
-        store = sto.Store.init(self.root / "evidence", sto.default_config("o/lib", "Fixture"))
+        store = sto.Store.init(self.root / "evidence", sto.default_config("o/lib", "Fixture", "Fixture store"))
         added = store.add([review("triple"), review("triple"),
                            review("double", at="2026-10-01T00:00:00Z")])
         self.assertEqual(len(added), 2)
@@ -379,11 +379,11 @@ class StoreTests(unittest.TestCase):
         takes name axes of the rubric they say."""
         self.assertEqual(STANDARD_RUBRIC.names, ["object", "convention", "edge-cases", "junk", "vacuous",
                                                  "choice", "generality", "naming"])
-        store = sto.Store.init(self.root / "std", sto.default_config("o/lib", "Fixture"))
+        store = sto.Store.init(self.root / "std", sto.default_config("o/lib", "Fixture", "Fixture store"))
         self.assertEqual(store.rubric, STANDARD_RUBRIC)
         mine = {"name": "https://example.org/precision/1",
                 "axes": [{"name": "precision", "check": "it is precise", "problem": "imprecise"}]}
-        store = sto.Store.init(self.root / "mine", {**sto.default_config("o/lib", "Fixture"), "rubric": mine})
+        store = sto.Store.init(self.root / "mine", {**sto.default_config("o/lib", "Fixture", "Fixture store"), "rubric": mine})
         self.assertEqual(store.rubric.names, ["precision"])
         store.add([review("triple", verdict="problem", rubric=mine["name"], category="precision")])
         with self.assertRaises(sto.StoreError):
@@ -395,7 +395,7 @@ class StoreTests(unittest.TestCase):
         self.assertTrue(rb.errors({"name": "x", "axes": [{"name": "Two Words", "check": "c", "problem": "p"}]}))
         self.assertTrue(rb.errors({"name": "x", "axes": [{"name": "a", "check": "c"}]}))
         (self.root / "bad").mkdir()
-        (self.root / "bad" / "store.json").write_text(json.dumps({**sto.default_config("o/lib", "F"),
+        (self.root / "bad" / "store.json").write_text(json.dumps({**sto.default_config("o/lib", "F", "Fixture store"),
                                                                   "rubric": {"name": "x", "axes": []}}))
         with self.assertRaises(sto.StoreError):
             sto.Store.load(self.root / "bad")
@@ -414,7 +414,7 @@ class StoreTests(unittest.TestCase):
         git("init", "-q")
         git("config", "user.email", "t@example.org")
         git("config", "user.name", "t")
-        store = sto.Store.init(repo / "evidence", sto.default_config("o/lib", "Fixture"))
+        store = sto.Store.init(repo / "evidence", sto.default_config("o/lib", "Fixture", "Fixture store"))
         store.add([review("triple")])
         git("add", "-A")
         git("commit", "-qm", "one")

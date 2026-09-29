@@ -22,7 +22,7 @@ from evidence_core.store import Store, StoreError, default_config, with_imports
 V = Path(__file__).parent / "vectors"
 A, B = Dataset.load(V / "fixture-a"), Dataset.load(V / "fixture-b")
 F = "Fixture."
-OTHER = "other/lib"
+OTHER = {"repo": "other/lib", "name": "Other"}
 
 
 def person(login: str) -> dict:
@@ -111,24 +111,41 @@ class Imports(unittest.TestCase):
 class ReadingImports(unittest.TestCase):
     def write_store(self, where: Path, records: list[dict], **config) -> None:
         where.mkdir(parents=True)
-        (where / "store.json").write_text(json.dumps({**default_config("me/lib", "Fixture"), **config}))
+        (where / "store.json").write_text(json.dumps({**default_config("me/lib", "Fixture", "Mine"), **config}))
         (where / "records.jsonl").write_text("".join(json.dumps(r) + "\n" for r in records))
 
     def test_with_imports(self):
         mine, theirs = review("triple", "alice", ds=B), review("triple_pos", "bob")
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
-            self.write_store(tmp / "evidence", [mine], imports=[{"repo": OTHER}])
-            self.write_store(tmp / "cache" / OTHER / "evidence", [theirs, mine],
+            self.write_store(tmp / "evidence", [mine], imports=[{"repo": OTHER["repo"]}])
+            self.write_store(tmp / "cache" / OTHER["repo"] / "evidence", [theirs, mine], name=OTHER["name"],
                              imports=[{"repo": "third/one"}])   # one level: not read
-            (tmp / "cache" / "imports.json").write_text(json.dumps([{"repo": OTHER, "path": "evidence", "commit": "abc"}]))
+            (tmp / "cache" / "imports.json").write_text(json.dumps([{"repo": OTHER["repo"], "path": "evidence", "commit": "abc"}]))
             got = with_imports(Store.load(tmp / "evidence"), tmp / "cache")
             self.assertEqual([r["id"] for r in got.records], [mine["id"], theirs["id"]])
             self.assertEqual(got.sources, {theirs["id"]: OTHER})
-            self.assertEqual(got.read, [{"repo": OTHER, "path": "evidence", "ref": None, "commit": "abc", "records": 1}])
+            self.assertEqual(got.read, [{"repo": OTHER["repo"], "path": "evidence", "ref": None, "name": OTHER["name"],
+                                         "commit": "abc", "records": 1}])
             with self.assertRaises(StoreError):  # imported, but not fetched
                 self.write_store(tmp / "e2", [], imports=[{"repo": "not/fetched"}])
                 with_imports(Store.load(tmp / "e2"), tmp / "cache")
+
+    def test_a_store_has_a_name(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for bad in ("", " ", "two\nlines", 3):
+                where = Path(tmp) / str(abs(hash(repr(bad))))
+                self.write_store(where, [], name=bad)
+                with self.assertRaises(StoreError, msg=repr(bad)):
+                    Store.load(where)
+            self.write_store(Path(tmp) / "none", [])
+            config = json.loads((Path(tmp) / "none" / "store.json").read_text())
+            del config["name"]
+            (Path(tmp) / "none" / "store.json").write_text(json.dumps(config))
+            with self.assertRaises(StoreError):
+                Store.load(Path(tmp) / "none")
+            self.write_store(Path(tmp) / "good", [])
+            self.assertEqual(Store.load(Path(tmp) / "good").name, "Mine")
 
     def test_imports_are_checked(self):
         with tempfile.TemporaryDirectory() as tmp:

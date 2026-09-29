@@ -1,8 +1,8 @@
 """Evidence stores (S3, "Evidence stores"): a directory ``evidence/`` in a git repository.
 
-* ``evidence/store.json`` describes the store: the library its records are about, where the S2
-  datasets of the library's commits are, and the rubric its forms ask for (``ltb-rubric/1`` unless
-  it gives another);
+* ``evidence/store.json`` describes the store: its name, the library its records are about, where
+  the S2 datasets of the library's commits are, and the rubric its forms ask for (``ltb-rubric/1``
+  unless it gives another);
 * records are the lines of every ``*.jsonl`` file under ``evidence/``, and the store is the set of
   them by ``id``;
 * the store is append-only: a record, once written, is never changed or removed;
@@ -25,7 +25,7 @@ from pathlib import Path
 from . import records as rec
 from . import rubric as rb
 
-STORE_SPEC = "ltb-evidence-store/0"
+STORE_SPEC = "ltb-evidence-store/1"
 CONFIG = "store.json"
 #: In a directory of fetched imports: which commit each imported store was read at.
 IMPORTS_MANIFEST = "imports.json"
@@ -36,8 +36,8 @@ class StoreError(ValueError):
     pass
 
 
-def default_config(repo: str, root: str, datasets_repo: str | None = None) -> dict:
-    return {"spec": STORE_SPEC, "library": {"repo": repo, "root": root},
+def default_config(repo: str, root: str, name: str, datasets_repo: str | None = None) -> dict:
+    return {"spec": STORE_SPEC, "name": name, "library": {"repo": repo, "root": root},
             "datasets": {"repo": datasets_repo or repo, "tag": "dataset-{commit12}",
                          "asset": "dataset.tar.gz"},
             "claims": [], "maintainers": []}
@@ -92,6 +92,9 @@ class Store:
         config = json.loads(cfg_path.read_text(encoding="utf-8"))
         if config.get("spec") != STORE_SPEC:
             raise StoreError(f"{cfg_path}: spec {config.get('spec')!r}, expected {STORE_SPEC!r}")
+        name = config.get("name")
+        if not isinstance(name, str) or not name.strip() or "\n" in name:
+            raise StoreError(f"{cfg_path}: `name` must be the store's name, one line")
         if config.get("rubric") is not None and rb.errors(config["rubric"]):
             raise StoreError(f"{cfg_path}: rubric: {'; '.join(rb.errors(config['rubric']))}")
         if import_errors(config):
@@ -112,6 +115,10 @@ class Store:
         if not any((root / "records").iterdir()):
             keep.write_text("")
         return cls.load(root)
+
+    @property
+    def name(self) -> str:
+        return self.config["name"]
 
     @property
     def imports(self) -> list[dict]:
@@ -190,10 +197,11 @@ class Imported:
 
     #: the store's own records, then each imported record it does not hold
     records: list[dict]
-    #: the id of each imported record → the store it comes from (``owner/name``)
-    sources: dict[str, str]
-    #: each imported store as read: ``{repo, path, ref, commit, records}``, ``records`` the number
-    #: of its records the store did not hold already
+    #: the id of each imported record → the store it comes from, ``{repo, name}``: its repository
+    #: (``owner/name``) and the name its ``store.json`` gives it
+    sources: dict[str, dict]
+    #: each imported store as read: ``{repo, path, ref, name, commit, records}``, ``records`` the
+    #: number of its records the store did not hold already
     read: list[dict]
 
 
@@ -212,13 +220,14 @@ def with_imports(store: Store, cache: str | Path) -> Imported:
         where = cache / spec["repo"] / spec["path"]
         if not (where / CONFIG).exists():
             raise StoreError(f"{spec['repo']}: not fetched into {cache} (evidence-store fetch-imports)")
-        n = 0
-        for r in Store.load(where).records:
+        other, n = Store.load(where), 0
+        source = {"repo": spec["repo"], "name": other.name}
+        for r in other.records:
             if r["id"] not in own and r["id"] not in sources:
-                sources[r["id"]] = spec["repo"]
+                sources[r["id"]] = source
                 records.append(r)
                 n += 1
-        read.append({**spec, "commit": commits.get((spec["repo"], spec["path"])), "records": n})
+        read.append({**spec, "name": other.name, "commit": commits.get((spec["repo"], spec["path"])), "records": n})
     return Imported(records=records, sources=sources, read=read)
 
 
