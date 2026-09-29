@@ -60,14 +60,15 @@ def record_view(ev: Evidence, r: dict, s: st.Status, decl: str) -> dict:
     out["inForce"] = out["supersededBy"] is None and out["state"] != "withdrawn"
     kind = r["kind"]
     if kind == "review":
-        out.update(verdict=r["verdict"], category=r.get("category"), reference=r.get("reference"),
+        out.update(verdict=r["verdict"], rubric=r.get("rubric"), category=r.get("category"), reference=r.get("reference"),
                    checked=r.get("checked") or {}, caveats=r.get("caveats") or [], fix=r.get("fix", ""))
     elif kind == "comment":
         out.update(repliesTo=(r.get("links") or {}).get("replies_to"))
     elif kind == "test":
         out.update(test=(r.get("test") or {}).get("name"))
     elif kind == "challenge":
-        out.update(statement=r.get("statement", ""), catches=r.get("catches", ""), modes=r.get("modes", []))
+        out.update(statement=r.get("statement", ""), catches=r.get("catches", ""), modes=r.get("modes", []),
+                   rubric=r.get("rubric"))
     elif kind == "named":
         out.update(name=r.get("name", ""), what=r.get("what", ""), reference=r.get("reference"))
     return out

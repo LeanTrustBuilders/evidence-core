@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 
 from .dataset import Dataset
 from .records import SCHEMA, parse_agent, subject_from_decl, with_id
+from .rubric import STANDARD
 
 
 @dataclass
@@ -119,9 +120,9 @@ def from_reviewed_by(records: list[dict], tests: list[dict], named: list[dict],
             if subject is None:
                 rep.skipped.append(f"problem on {p.get('decl')}: not in any dataset")
                 continue
-            category = {"wrong": "F1", "misleading": "naming"}.get(p.get("what", ""), "other")
+            category = {"wrong": "object", "misleading": "naming"}.get(p.get("what", ""), "other")
             out = {"schema": SCHEMA, "kind": "review", "subject": subject,
-                   "verdict": "problem", "category": category,
+                   "verdict": "problem", "rubric": STANDARD.name, "category": category,
                    "text": p.get("why", "") or "(no reason recorded)",
                    "by": _github_by(p.get("by", ""), p.get("kind", "person"), p.get("agent", "")),
                    "at": p.get("at", ""), "origin": {"kind": "issue", "ref": f"{repo}#{issue}"},

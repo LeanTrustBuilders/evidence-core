@@ -85,11 +85,11 @@ class Evidence:
     def resolve(cls, records: list[dict], dataset: Dataset, old: dict[str, Dataset] | None = None
                 ) -> "Evidence":
         """Resolves records against ``dataset``. ``old`` optionally maps commits to datasets of
-        those commits, so that stale-underneath statuses can name what changed. Records are read as
-        version 1 (`records.read`), and those a reader of it cannot use are left out."""
+        those commits, so that stale-underneath statuses can name what changed. Records a reader of
+        this version cannot use are left out (`records.readable`)."""
         ev = cls(dataset=dataset)
         old = old or {}
-        ordered = sorted((rec.read(r) for r in records if rec.readable(r)),
+        ordered = sorted((r for r in records if rec.readable(r)),
                          key=lambda r: (r.get("at", ""), r.get("id", "")))
         ev.by_id = {r["id"]: r for r in ordered if r.get("id")}
         decl_of: dict[str, str] = {}
@@ -279,11 +279,11 @@ class Evidence:
         """The `named` records about a declaration that are not withdrawn."""
         return [r for r, _ in self.records_on(name, "named") if self.state(r["id"]) != "withdrawn"]
 
-    def checked(self, name: str) -> dict[str, list[dict]]:
-        """For each failure mode, the acceptances in force that say they checked it."""
+    def checked(self, name: str, rubric: str | None = None) -> dict[str, list[dict]]:
+        """For each axis (of ``rubric``, if given), the acceptances in force that say they checked it."""
         out: dict[str, list[dict]] = {}
         for r, s in self.records_on(name, "review"):
-            if r.get("verdict") == "accept" and self.in_force(r, s):
+            if r.get("verdict") == "accept" and self.in_force(r, s) and rubric in (None, r.get("rubric")):
                 for mode, state in (r.get("checked") or {}).items():
                     if state == "checked":
                         out.setdefault(mode, []).append(r)

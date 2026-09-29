@@ -1,8 +1,8 @@
-"""S3 evidence records (spec ``ltb-evidence/1``).
+"""S3 evidence records (spec ``ltb-evidence/2``).
 
 Records are JSON objects, stored one per line (JSONL), append-only. Every record has:
 
-* ``schema``: ``"ltb-evidence/1"``;
+* ``schema``: ``"ltb-evidence/2"``;
 * ``kind``: ``review``, ``comment``, ``status``, ``test``, ``challenge`` or ``named`` in this
   version;
 * ``id``: the first 16 hex digits of the SHA-256 of the record's canonical form, which excludes
@@ -13,7 +13,9 @@ Records are JSON objects, stored one per line (JSONL), append-only. Every record
   a challenge's property, what a named result is);
 * ``by``: who made it, which is never anonymous: a GitHub account (``identity``), or an AI agent
   (``agent``), or an agent acting through a GitHub account (both); ``at``: when (RFC 3339, UTC);
-  ``origin``: where it came from.
+  ``origin``: where it came from;
+* ``rubric``, when the record names axes (a problem's ``category``, ``checked``, ``caveats``, a
+  challenge's ``modes``): the rubric they are axes of (``rubric.py``).
 
 The canonical form is the JSON encoding with sorted keys, no whitespace, and non-ASCII characters
 written as themselves: RFC 8785 for records, whose keys are ASCII and numbers integers.
@@ -26,11 +28,12 @@ import re
 from pathlib import Path
 from typing import Iterable
 
-SCHEMA = "ltb-evidence/1"
+from . import rubric as rb
+
+SCHEMA = "ltb-evidence/2"
 KINDS = ("review", "comment", "status", "test", "challenge", "named")
 VERDICTS = ("accept", "problem", "question")
 ASPECTS = ("definition", "statement", "instance")
-PROBLEM_CATEGORIES = ("F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "naming", "other")
 CHECK_STATES = ("checked", "unchecked", "na")
 STATES = ("fixed", "intended", "invalid", "answered", "met", "failed", "declined", "reopened", "withdrawn")
 #: What each state may be set on: a review of that verdict, or a record of that kind.
@@ -146,15 +149,6 @@ def subject_from_decl(decl, dataset, aspect: str | None = None) -> dict:
     }
 
 
-def read(record: dict) -> dict:
-    """A record as this reader reads it: a failure mode it does not know is ``other`` (S3,
-    "Compatibility")."""
-    if record.get("kind") == "review" and record.get("category") and \
-            record["category"] not in PROBLEM_CATEGORIES:
-        return {**record, "category": "other"}
-    return record
-
-
 def readable(record: dict) -> bool:
     """Whether a reader of this version can use a record: of a version it reads, of a kind it
     knows, and with a verdict or state it knows (S3, "Compatibility")."""
@@ -167,8 +161,9 @@ def readable(record: dict) -> bool:
     return True
 
 
-def validate(record: dict) -> list[str]:
-    """Problems with a record, as messages. Empty when the record is valid."""
+def validate(record: dict, rubrics: dict[str, rb.Rubric] | None = None) -> list[str]:
+    """Problems with a record, as messages. Empty when the record is valid. The axes it names are
+    checked against its rubric when that is one of ``rubrics`` (by name; the standard one always)."""
     errs: list[str] = []
 
     def need(key: str, where: dict = record, path: str = "") -> bool:
@@ -199,8 +194,7 @@ def validate(record: dict) -> list[str]:
         if verdict not in VERDICTS:
             errs.append(f"verdict must be one of {VERDICTS}")
         if verdict == "problem":
-            if record.get("category") not in PROBLEM_CATEGORIES:
-                errs.append(f"category must be one of {PROBLEM_CATEGORIES}")
+            need("category")
             if not record.get("text"):
                 errs.append("a problem needs its text: why")
         if agent and not record.get("text"):
@@ -208,9 +202,6 @@ def validate(record: dict) -> list[str]:
         for f, state in (record.get("checked") or {}).items():
             if state not in CHECK_STATES:
                 errs.append(f"checked.{f} must be one of {CHECK_STATES}")
-        for c in record.get("caveats") or []:
-            if c.get("category") not in PROBLEM_CATEGORIES:
-                errs.append(f"caveat category {c.get('category')!r} is unknown")
     elif kind == "comment":
         need("text")
         if not (record.get("links") or {}).get("replies_to"):
@@ -226,13 +217,37 @@ def validate(record: dict) -> list[str]:
             errs.append("a test listed by an agent says what it checks (text)")
     elif kind == "challenge":
         need("text")
-        for m in record.get("modes") or []:
-            if m not in PROBLEM_CATEGORIES:
-                errs.append(f"mode {m!r} is not a failure mode")
     elif kind == "named":
         need("name")
         if record.get("what", "result") not in NAMED_WHAT:
             errs.append(f"what must be one of {NAMED_WHAT}")
+    errs += _axes_errors(record, rb.known(*(rubrics or {}).values()))
+    return errs
+
+
+def _axes_errors(record: dict, rubrics: dict[str, rb.Rubric]) -> list[str]:
+    """Problems with the axes a record names (S3, "Rubrics"): each is an axis of the record's
+    rubric (only ``category`` may be ``other``), checked when that rubric is known."""
+    axes = [(f"checked.{a}", a, False) for a in record.get("checked") or {}]
+    axes += [("modes", m, False) for m in record.get("modes") or []]
+    axes += [("caveat category", c.get("category") if isinstance(c, dict) else None, True)
+             for c in record.get("caveats") or []]
+    if record.get("category") is not None:
+        axes.append(("category", record["category"], True))
+    if not axes:
+        return []
+    name = record.get("rubric")
+    if not isinstance(name, str) or not name:
+        return ["a record that names axes says which rubric they are from (rubric)"]
+    rubric = rubrics.get(name)
+    errs = []
+    for where, axis, other_ok in axes:
+        if axis == rb.OTHER and other_ok:
+            continue
+        if not isinstance(axis, str) or not rb.AXIS_NAME.match(axis) or axis == rb.OTHER:
+            errs.append(f"{where}: {axis!r} is not an axis name")
+        elif rubric and axis not in rubric.names:
+            errs.append(f"{where}: {axis!r} is not an axis of {name}")
     return errs
 
 

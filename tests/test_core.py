@@ -22,6 +22,8 @@ from evidence_core import records as rec
 from evidence_core import status as st
 from evidence_core import migrate as mig
 from evidence_core import store as sto
+from evidence_core import rubric as rb
+from evidence_core import STANDARD_RUBRIC
 from evidence_core.cli import main as cli
 
 VECTORS = Path(__file__).parent / "vectors"
@@ -42,7 +44,8 @@ def review(name: str, ds: Dataset = A, verdict: str = "accept", agent: bool = Fa
     if agent or verdict == "problem":
         r["text"] = "because"
     if verdict == "problem":
-        r["category"] = "F1"
+        r["category"] = "object"
+    r["rubric"] = "ltb-rubric/1"
     r.update(extra)
     return with_id(r)
 
@@ -283,15 +286,15 @@ def comment(target: dict, text: str, by: dict, at: str) -> dict:
 
 class ThreadTests(unittest.TestCase):
     def test_what_a_reader_does_not_know(self):
-        """S3, Compatibility: a failure mode it does not know is `other`; a record of a kind, verdict,
-        state or version it does not know is left out."""
-        prob = review("triple", verdict="problem", category="F42")
+        """S3, Compatibility: an axis of a rubric it does not know is kept as it is; a record of a
+        kind, verdict, state or version it does not know is left out."""
+        prob = review("triple", verdict="problem", rubric="elsewhere/1", category="precision")
         ev = Evidence.resolve([prob, review("triple", verdict="maybe"),
                                with_id({**review("double"), "kind": "endorsement"}),
                                with_id({**review("double"), "schema": "ltb-evidence/0"}),
                                status(prob, "postponed", person("tester"), "2026-09-26T10:00:00Z")], B)
         [(r, _)] = ev.records_on(F + "triple")
-        self.assertEqual((r["id"], r["category"]), (prob["id"], "other"))
+        self.assertEqual((r["id"], r["category"]), (prob["id"], "precision"))
         self.assertEqual(ev.records_on(F + "double"), [])
         self.assertEqual(ev.state(prob["id"]), "open")
 
@@ -306,7 +309,7 @@ class ThreadTests(unittest.TestCase):
     def test_supersedes_only_the_same_reviewer(self):
         first = review("triple")
         again = with_id({**review("triple", at="2026-09-26T10:00:00Z"), "links": {"supersedes": first["id"]},
-                         "caveats": [{"category": "F3", "note": "at 0"}]})
+                         "caveats": [{"category": "edge-cases", "note": "at 0"}]})
         other = with_id({**review("triple_pos", at="2026-09-26T11:00:00Z"), "by": person("other"),
                          "links": {"supersedes": review("triple_pos")["id"]}})
         ev = Evidence.resolve([first, again, review("triple_pos"), other], B)
@@ -332,12 +335,14 @@ class ThreadTests(unittest.TestCase):
         self.assertEqual(ev.open_questions(F + "triple"), [q])
 
     def test_disagreement_and_checklist(self):
-        acc = with_id({**review("triple"), "checked": {"F1": "checked", "F4": "unchecked"}})
-        prob = with_id({**review("triple", verdict="problem", category="F3"),
+        acc = with_id({**review("triple"), "checked": {"object": "checked", "junk": "unchecked"}})
+        prob = with_id({**review("triple", verdict="problem", category="edge-cases"),
                         "by": person("other")})
         ev = Evidence.resolve([acc, prob], B)
         self.assertTrue(ev.disagreement(F + "triple"))
-        self.assertEqual(list(ev.checked(F + "triple")), ["F1"])
+        self.assertEqual(list(ev.checked(F + "triple")), ["object"])
+        self.assertEqual(list(ev.checked(F + "triple", "ltb-rubric/1")), ["object"])
+        self.assertEqual(ev.checked(F + "triple", "elsewhere/1"), {})
         self.assertFalse(ev.reviewed(F + "triple", Policy()))
 
 
@@ -368,6 +373,32 @@ class StoreTests(unittest.TestCase):
             sto.Store.load(self.root / "evidence")
         with self.assertRaises(sto.StoreError):
             store.add([{**review("triple"), "by": {"kind": "person"}}])
+
+    def test_rubric(self):
+        """A store asks for the standard rubric unless its store.json gives another; the records it
+        takes name axes of the rubric they say."""
+        self.assertEqual(STANDARD_RUBRIC.names, ["object", "convention", "edge-cases", "junk", "vacuous",
+                                                 "choice", "generality", "naming"])
+        store = sto.Store.init(self.root / "std", sto.default_config("o/lib", "Fixture"))
+        self.assertEqual(store.rubric, STANDARD_RUBRIC)
+        mine = {"name": "https://example.org/precision/1",
+                "axes": [{"name": "precision", "check": "it is precise", "problem": "imprecise"}]}
+        store = sto.Store.init(self.root / "mine", {**sto.default_config("o/lib", "Fixture"), "rubric": mine})
+        self.assertEqual(store.rubric.names, ["precision"])
+        store.add([review("triple", verdict="problem", rubric=mine["name"], category="precision")])
+        with self.assertRaises(sto.StoreError):
+            store.add([review("double", verdict="problem", rubric=mine["name"], category="object")])
+        # `other` is always a category, never an axis to check.
+        store.add([review("double", verdict="problem", rubric=mine["name"], category="other")])
+        with self.assertRaises(sto.StoreError):
+            store.add([review("double", rubric=mine["name"], checked={"other": "checked"})])
+        self.assertTrue(rb.errors({"name": "x", "axes": [{"name": "Two Words", "check": "c", "problem": "p"}]}))
+        self.assertTrue(rb.errors({"name": "x", "axes": [{"name": "a", "check": "c"}]}))
+        (self.root / "bad").mkdir()
+        (self.root / "bad" / "store.json").write_text(json.dumps({**sto.default_config("o/lib", "F"),
+                                                                  "rubric": {"name": "x", "axes": []}}))
+        with self.assertRaises(sto.StoreError):
+            sto.Store.load(self.root / "bad")
 
     def test_check(self):
         a, b = review("triple"), review("double")
@@ -525,9 +556,16 @@ class ChallengeAndTestTests(unittest.TestCase):
                         "by": {"kind": "person", "identity": {"kind": "github", "id": "tester"}}, "at": at, **fields})
 
     def test_validation(self):
-        self.assertEqual(validate(self.rec("challenge", "double", text="double 0 = 0", modes=["F3"])), [])
+        std = "ltb-rubric/1"
+        self.assertEqual(validate(self.rec("challenge", "double", text="double 0 = 0", rubric=std,
+                                           modes=["edge-cases"])), [])
         self.assertIn("missing text", validate(self.rec("challenge", "double")))
-        self.assertTrue(any("mode" in e for e in validate(self.rec("challenge", "double", text="p", modes=["F99"]))))
+        self.assertTrue(any("not an axis of ltb-rubric/1" in e for e in
+                            validate(self.rec("challenge", "double", text="p", rubric=std, modes=["precision"]))))
+        self.assertTrue(any("not an axis name" in e for e in
+                            validate(self.rec("challenge", "double", text="p", rubric=std, modes=["F3"]))))
+        self.assertTrue(any("which rubric" in e for e in
+                            validate(self.rec("challenge", "double", text="p", modes=["edge-cases"]))))
         self.assertEqual(validate(self.rec("test", "double", test={"name": F + "double_zero"})), [])
         self.assertTrue(any("says what it checks" in e for e in
                             validate(self.rec("test", "double", agent=True, test={"name": F + "double_zero"}))))

@@ -39,7 +39,8 @@ def review(name: str, by: dict, verdict: str = "accept", ds: Dataset = B, at: st
     if by["kind"] == "agent" or verdict != "accept":
         r.setdefault("text", "because")
     if verdict == "problem":
-        r.setdefault("category", "F3")
+        r.setdefault("category", "edge-cases")
+        r.setdefault("rubric", "ltb-rubric/1")
     return with_id(r)
 
 

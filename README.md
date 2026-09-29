@@ -42,6 +42,12 @@ superseded. An acceptance and an open problem in force on one declaration are a 
 rather than resolved. Records are never anonymous: each names a GitHub account, or an AI agent
 (`{tool, model, session}`), or both.
 
+**Rubrics.** A review says which axes it checked and a problem which one is wrong (`checked`,
+`category`), each an axis of the rubric the record names. `rubric.STANDARD` is `ltb-rubric/1`, the one
+S3 suggests: `object`, `convention`, `edge-cases`, `junk`, `vacuous`, `choice`, `generality`,
+`naming`. A store's `store.json` may give another (`Store.rubric`); records are validated against
+the rubrics known, and an axis of an unknown rubric is kept by its name.
+
 **Tests and challenges.** A `test` names a declaration of the library that tests another; a
 `challenge` is a proposed test, open until it is met, failed, declined or withdrawn.
 `Evidence.tests(name)` lists a declaration's tests, those of met challenges included, each

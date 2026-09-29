@@ -50,9 +50,10 @@ def _records(path: str) -> list[dict]:
 
 
 def cmd_store_check(args) -> int:
-    after = sto.Store.load(Path(args.repo) / args.store).records
+    store = sto.Store.load(Path(args.repo) / args.store)
+    after = store.records
     before = sto.records_at(args.repo, args.base, args.store) if args.base else []
-    errs = sto.check(before, after, author=args.author or None)
+    errs = sto.check(before, after, author=args.author or None, rubrics={store.rubric.name: store.rubric})
     for e in errs:
         print(f"error: {e}", file=sys.stderr)
     new = len({r["id"] for r in after} - {r["id"] for r in before})

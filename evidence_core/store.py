@@ -1,7 +1,8 @@
 """Evidence stores (S3, "Evidence stores"): a directory ``evidence/`` in a git repository.
 
-* ``evidence/store.json`` describes the store: the library its records are about, and where the S2
-  datasets of the library's commits are;
+* ``evidence/store.json`` describes the store: the library its records are about, where the S2
+  datasets of the library's commits are, and the rubric its forms ask for (``ltb-rubric/1`` unless
+  it gives another);
 * records are the lines of every ``*.jsonl`` file under ``evidence/``, and the store is the set of
   them by ``id``;
 * the store is append-only: a record, once written, is never changed or removed.
@@ -18,6 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import records as rec
+from . import rubric as rb
 
 STORE_SPEC = "ltb-evidence-store/0"
 CONFIG = "store.json"
@@ -36,7 +38,9 @@ def default_config(repo: str, root: str, datasets_repo: str | None = None) -> di
 
 def parse_records(text: str, where: str) -> list[dict]:
     out = []
-    for n, line in enumerate(text.splitlines(), 1):
+    # JSON lines are separated by "\n" only: `splitlines` would also split inside strings, at
+    # Unicode line separators.
+    for n, line in enumerate(text.split("\n"), 1):
         if line.strip():
             try:
                 out.append(json.loads(line))
@@ -81,6 +85,8 @@ class Store:
         config = json.loads(cfg_path.read_text(encoding="utf-8"))
         if config.get("spec") != STORE_SPEC:
             raise StoreError(f"{cfg_path}: spec {config.get('spec')!r}, expected {STORE_SPEC!r}")
+        if config.get("rubric") is not None and rb.errors(config["rubric"]):
+            raise StoreError(f"{cfg_path}: rubric: {'; '.join(rb.errors(config['rubric']))}")
         chunks = [(str(p.relative_to(root)), parse_records(p.read_text(encoding="utf-8"), str(p)))
                   for p in sorted(root.rglob("*.jsonl"))]
         records, conflicts = merge(chunks)
@@ -97,6 +103,11 @@ class Store:
         if not any((root / "records").iterdir()):
             keep.write_text("")
         return cls.load(root)
+
+    @property
+    def rubric(self) -> rb.Rubric:
+        """The rubric the store's forms ask for."""
+        return rb.of_config(self.config)
 
     @property
     def ids(self) -> set[str]:
@@ -118,7 +129,7 @@ class Store:
         added = []
         for r in records:
             r = rec.with_id(r)
-            errs = rec.validate(r)
+            errs = rec.validate(r, {self.rubric.name: self.rubric})
             if errs:
                 raise StoreError(f"invalid record: {'; '.join(errs)}")
             if r["id"] in self.ids:
@@ -134,13 +145,14 @@ class Store:
 
 
 def check(before: list[dict], after: list[dict], author: str | None = None,
-          may_write=None) -> list[str]:
+          may_write=None, rubrics: dict[str, rb.Rubric] | None = None) -> list[str]:
     """What is wrong with a change of a store from ``before`` to ``after``: invalid records, records
     changed or removed, and new records whose identity is not the writer's.
 
     ``author`` is the GitHub login that made the change (a pull request's author): every new record
     must name it as ``by.identity``. ``may_write(record)``, when given, decides instead (an intake
-    bot writes records for the accounts whose issues and comments it read)."""
+    bot writes records for the accounts whose issues and comments it read). ``rubrics`` are the
+    rubrics, besides the standard one, whose axes new records are checked against."""
     errs = []
     old = {r.get("id"): rec.canonical(r) for r in before}
     new = {r.get("id"): r for r in after}
@@ -152,7 +164,7 @@ def check(before: list[dict], after: list[dict], author: str | None = None,
     for rid, r in new.items():
         if rid in old:
             continue
-        for e in rec.validate(r):
+        for e in rec.validate(r, rubrics):
             errs.append(f"record {rid}: {e}")
         if may_write is not None:
             if not may_write(r):
