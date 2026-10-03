@@ -11,7 +11,8 @@ shows about them. Python, standard library only.
 pip install git+https://github.com/LeanTrustBuilders/evidence-core
 ```
 
-or run it from a checkout with `python3 -m evidence_core`.
+or run it from a checkout with `python3 -m evidence_core`. Releases are tagged `v<version>`: pin one
+with `git+https://github.com/LeanTrustBuilders/evidence-core@v0.16.1`.
 
 ## What it computes
 
